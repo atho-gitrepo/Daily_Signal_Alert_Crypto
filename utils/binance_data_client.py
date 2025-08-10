@@ -1,5 +1,5 @@
 from binance.lib.utils import config_logging
-from binance.um_futures import UMFutures  # New (binance-connector)
+from binance.futures import Futures  # For Futures API
 from binance.error import ClientError
 from config import Config
 import logging
