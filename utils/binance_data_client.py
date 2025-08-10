@@ -1,5 +1,5 @@
-# utils/binance_data_client.py
-from binance.um_futures import UMFutures
+from binance.lib.utils import config_logging
+from binance.um_futures import UMFutures  # New (binance-connector)
 from binance.error import ClientError
 from config import Config
 import logging
