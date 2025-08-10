@@ -1,0 +1,29 @@
+# .gitignore
+# Logs
+*.log
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+venv/
+.venv/
+
+# Environment variables
+.env
+
+# API Keys (if not using env variables, though highly discouraged)
+# config.py # Uncomment if you put sensitive data directly in config.py and don't want to push it
+
+# IDE-specific files
+.vscode/
+.idea/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Zipped files
+*.zip
