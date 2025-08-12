@@ -2,8 +2,6 @@ from binance.lib.utils import config_logging
 from binance.um_futures import UMFutures  # Correct import for USDⓈ-M Futures
 from binance.error import ClientError
 from config import Config
-from binance
-import binance
 import logging
 import pandas as pd
 import math
