@@ -1,6 +1,4 @@
-from binance.lib.utils import config_logging
-from binance.um_futures import UMFutures  # Correct import for USDⓈ-M Futures
-from binance.error import ClientError
+import ccxt
 from config import Config
 import logging
 import pandas as pd
@@ -10,89 +8,76 @@ logger = logging.getLogger(__name__)
 
 class BinanceDataClient:
     def __init__(self):
-        # Initialize UMFutures client with proper configuration
-        self.client = UMFutures(
-            key=Config.BINANCE_API_KEY if Config.BINANCE_API_KEY else None,
-            secret=Config.BINANCE_API_SECRET if Config.BINANCE_API_SECRET else None,
-            base_url=Config.BINANCE_FUTURES_API_URL
-        )
+        # Initialize CCXT client
+        self.client = ccxt.binance({
+            'apiKey': Config.BINANCE_API_KEY,
+            'secret': Config.BINANCE_API_SECRET,
+            # For futures, specify the options.defaultType
+            'options': {'defaultType': 'future'},
+        })
         self.symbol = Config.SYMBOL
-        self.symbol_info = self.get_exchange_info(self.symbol)
+        self.market_info = self.client.market(self.symbol)
         
-        if self.symbol_info:
-            logger.info(f"Binance Data client initialized for {Config.SYMBOL}. Base URL: {Config.BINANCE_FUTURES_API_URL}")
+        if self.market_info:
+            logger.info(f"Binance Data client initialized for {self.symbol} using ccxt.")
         else:
-            logger.error(f"Failed to get exchange info for {Config.SYMBOL}. Data client might not function correctly.")
-            raise RuntimeError(f"Could not retrieve exchange info for {Config.SYMBOL}")
+            logger.error(f"Failed to get market info for {self.symbol}. Data client might not function correctly.")
+            raise RuntimeError(f"Could not retrieve market info for {self.symbol}")
         
-        self.price_precision = self._get_precision('PRICE_FILTER', self.symbol_info)
+        # CCXT handles precision, you can access it via the market info
+        self.price_precision = self.market_info['precision']['price']
         logger.info(f"Price precision for {self.symbol}: {self.price_precision}")
 
-    def _get_precision(self, filter_type, symbol_info):
-        """Helper to get precision from symbol info."""
-        if not symbol_info:
-            return 0  # Default if info not available
-
-        for f in symbol_info['filters']:
-            if f['filterType'] == filter_type:
-                if filter_type == 'PRICE_FILTER':
-                    return int(-math.log10(float(f['tickSize'])))
-        return 0
-
     def _round_price(self, price):
-        """Rounds price to the correct precision for the symbol."""
-        if self.price_precision is None:
-            return price
-        return math.floor(price * (10**self.price_precision)) / (10**self.price_precision) * 1.0
+        """Rounds price to the correct precision using CCXT's built-in method."""
+        return self.client.price_to_precision(self.symbol, price)
 
     def get_historical_klines(self, symbol, interval, limit=500):
-        """Fetches historical candlestick data for Futures."""
+        """Fetches historical candlestick data for Futures using CCXT."""
         try:
-            klines = self.client.klines(symbol, interval, limit=limit)
-            data = [{
-                'timestamp': kline[0],
-                'open': float(kline[1]),
-                'high': float(kline[2]),
-                'low': float(kline[3]),
-                'close': float(kline[4]),
-                'volume': float(kline[5]),
-                'close_time': kline[6]
-            } for kline in klines]
+            # CCXT's fetch_ohlcv returns a list of lists
+            ohlcv = self.client.fetch_ohlcv(symbol, interval, limit=limit)
             
-            df = pd.DataFrame(data)
+            # The structure is [timestamp, open, high, low, volume]
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
+            
             return df
-        except ClientError as e:
-            logger.error(f"Binance API error fetching historical klines for {symbol}: {e}")
+        except ccxt.NetworkError as e:
+            logger.error(f"CCXT network error fetching historical klines for {symbol}: {e}")
+            return pd.DataFrame()
+        except ccxt.ExchangeError as e:
+            logger.error(f"CCXT exchange error fetching historical klines for {symbol}: {e}")
             return pd.DataFrame()
         except Exception as e:
             logger.error(f"Error fetching historical klines for {symbol}: {e}")
             return pd.DataFrame()
 
     def get_current_price(self, symbol):
-        """Fetches the current mark price for Futures."""
+        """Fetches the current ticker price for Futures using CCXT."""
         try:
-            ticker = self.client.mark_price(symbol)
-            return float(ticker['markPrice'])
-        except ClientError as e:
-            logger.error(f"Binance API error fetching current price for {symbol}: {e}")
+            ticker = self.client.fetch_ticker(symbol)
+            return ticker['last']
+        except ccxt.NetworkError as e:
+            logger.error(f"CCXT network error fetching current price for {symbol}: {e}")
+            return None
+        except ccxt.ExchangeError as e:
+            logger.error(f"CCXT exchange error fetching current price for {symbol}: {e}")
             return None
         except Exception as e:
             logger.error(f"Error fetching current price for {symbol}: {e}")
             return None
 
     def get_exchange_info(self, symbol):
-        """Fetches exchange information for a specific symbol."""
+        """Fetches exchange information for a specific symbol using CCXT."""
         try:
-            info = self.client.exchange_info()
-            for s_info in info['symbols']:
-                if s_info['symbol'] == symbol:
-                    return s_info
-            return None
-        except ClientError as e:
-            logger.error(f"Binance API error getting exchange info: {e}")
+            # CCXT's load_markets populates the markets dictionary
+            self.client.load_markets()
+            if symbol in self.client.markets:
+                return self.client.markets[symbol]
             return None
         except Exception as e:
-            logger.error(f"Error getting exchange info: {e}")
+            logger.error(f"Error getting exchange info with ccxt: {e}")
             return None
+
