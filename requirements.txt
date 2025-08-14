@@ -1,4 +1,4 @@
 python-telegram-bot
 pandas
 numpy
-binance-connector
+ccxt
