@@ -1,38 +1,43 @@
 import os
+
 class Config:
-    # Binance API Credentials (Optional for public data, can improve rate limits)
-    BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "") # Keep empty if not using for public data rate limits
-    BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "") # Keep empty if not using
+    # ------------------- Binance API Credentials -------------------
+    # These are loaded from environment variables for security.
+    # Set them in your Railway project.
+    BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
+    BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
 
-    # Binance Environment (True for Testnet, False for Live)
-    BINANCE_TESTNET = True # Still good to specify environment for data fetching
+    # --------------------- Binance Environment ---------------------
+    # Set to 'True' for Testnet, 'False' for Live (Production).
+    BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "False").lower() in ("true", "1", "t")
 
-    # Futures Specific Configuration for Data
-    BINANCE_FUTURES_API_URL = "https://testnet.binancefuture.com" if BINANCE_TESTNET else "https://fapi.binance.com"
+    # The base URL for the Binance Futures API.
+    # It automatically selects the Testnet or Live URL based on BINANCE_TESTNET.
+    BINANCE_FUTURES_API_URL: str = "https://testnet.binancefuture.com" if BINANCE_TESTNET else "https://fapi.binance.com"
 
-    # Market Data
-    SYMBOL = "BTCUSDT"  # Trading pair for notifications
-    TIMEFRAME = "15min"    # Candlestick interval
+    # ------------------------ Market Data --------------------------
+    SYMBOL: str = os.getenv("SYMBOL", "BTCUSDT") # Trading pair
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m") # Candlestick interval (e.g., '1m', '15m', '1h')
 
-    # Polling Interval (how often the bot checks for new candles/signals)
-    POLLING_INTERVAL_SECONDS = 30 # Check every 30 seconds
+    # ----------------------- Polling Interval ----------------------
+    POLLING_INTERVAL_SECONDS: int = int(os.getenv("POLLING_INTERVAL_SECONDS", "30")) # How often to check for new data
 
-    # Strategy Parameters (Consolidated Trend - same as before)
-    TDI_RSI_PERIOD = 20
-    TDI_PRICE_MA_PERIOD = 2
-    TDI_FAST_MA_PERIOD = 7
-    TDI_SLOW_MA_PERIOD = 14
-    BB_PERIOD = 34
-    BB_DEV = 2.0
+    # --------------------- Strategy Parameters ---------------------
+    TDI_RSI_PERIOD: int = 20
+    TDI_PRICE_MA_PERIOD: int = 2
+    TDI_FAST_MA_PERIOD: int = 7
+    TDI_SLOW_MA_PERIOD: int = 14
+    BB_PERIOD: int = 34
+    BB_DEV: float = 2.0
 
-    TDI_NO_TRADE_ZONE_START = 45
-    TDI_NO_TRADE_ZONE_END = 55
+    TDI_NO_TRADE_ZONE_START: float = 45.0
+    TDI_NO_TRADE_ZONE_END: float = 55.0
 
-    TDI_SOFT_BUY_LEVEL = 35
-    TDI_HARD_BUY_LEVEL = 25
-    TDI_SOFT_SELL_LEVEL = 65
-    TDI_HARD_SELL_LEVEL = 75
+    TDI_SOFT_BUY_LEVEL: float = 35.0
+    TDI_HARD_BUY_LEVEL: float = 25.0
+    TDI_SOFT_SELL_LEVEL: float = 65.0
+    TDI_HARD_SELL_LEVEL: float = 75.0
 
-    # Telegram Bot
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") # REPLACE WITH YOUR TOKEN
-    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") # REPLACE WITH YOUR CHAT ID
+    # ------------------------ Telegram Bot -------------------------
+    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
