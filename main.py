@@ -2,7 +2,7 @@
 import time
 import logging
 from settings import Config
-from utils.telegram_bot import send_telegram_message  # make sure this exists
+from utils.telegram_bot import send_telegram_message_sync as send_telegram_message
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from datetime import datetime
