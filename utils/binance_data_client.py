@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 # 🎯 FIX 1: Import FuturesClient from binance.futures
 from binance.client import Client 
-from binance.futures import FuturesClient 
+from binance.um_futures import UMFutures
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from settings import Config  
 
