@@ -2,7 +2,7 @@ import os
 
 class Config:
     # ------------------- Data Client Configuration -------------------
-    # NOTE: The Binance API credentials and URLs have been removed as 
+    # NOTE: Binance API credentials and URLs have been removed as 
     # the bot now uses CoinGecko's public API for real-time price checks
     # and mock data generation for strategy analysis.
 
