@@ -26,9 +26,18 @@ class BinanceDataClient:
         if not self.api_key or not self.api_secret:
             logger.warning("⚠️ Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
-        # ✅ Correct UMFutures initialization with 3 positional arguments
+        # ✅ FIXED: Use keyword arguments instead of positional arguments
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
-        self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
+        
+        if self.api_key and self.api_secret:
+            self.futures_client = UMFutures(
+                key=self.api_key,
+                secret=self.api_secret,
+                base_url=base_url
+            )
+        else:
+            # Public client without authentication
+            self.futures_client = UMFutures(base_url=base_url)
 
         self.price_precision = 2
         self._get_symbol_precision()
