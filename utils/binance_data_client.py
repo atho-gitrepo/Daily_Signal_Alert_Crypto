@@ -5,32 +5,35 @@ from binance.exceptions import BinanceAPIException, BinanceRequestException
 from config import Config
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 class BinanceDataClient:
-    """
-    Client for fetching REAL data (klines and price) from Binance USD-M Futures.
-    Uses the dedicated UMFutures client to avoid the 'futures' attribute error.
-    """
+    """Client for fetching real-time and historical data from Binance USD-M Futures."""
+
     def __init__(self):
         self.symbol = Config.SYMBOL
         self.api_key = Config.BINANCE_API_KEY
         self.api_secret = Config.BINANCE_API_SECRET
         self.is_testnet = Config.BINANCE_TESTNET
 
-        # ✅ FIXED: Correct positional arguments for UMFutures
+        # Correct initialization using keyword argument for base_url
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
-        self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
+        self.futures_client = UMFutures(
+            api_key=self.api_key,
+            api_secret=self.api_secret,
+            base_url=base_url
+        )
 
         self.price_precision = 2
-
         logger.info(f"Binance Data Client initialized. Testnet: {self.is_testnet}")
-        if not self.api_key:
-            logger.warning("Binance API Key is NOT set. Using public endpoints (lower rate limit).")
+
+        if not self.api_key or not self.api_secret:
+            logger.warning("Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
         self._get_symbol_precision()
 
     def _get_symbol_precision(self):
-        """Fetches the price precision from exchange info."""
+        """Fetch price precision from exchange info."""
         try:
             info = self.futures_client.exchange_info()
             symbol_info = next(
@@ -46,55 +49,41 @@ class BinanceDataClient:
                     step_size = price_filter['tickSize']
                     self.price_precision = len(step_size.split('.')[-1].rstrip('0'))
 
+            logger.info(f"Price precision for {self.symbol}: {self.price_precision}")
         except Exception as e:
             logger.error(f"Could not fetch symbol precision. Defaulting to {self.price_precision}. Error: {e}")
 
     def _round_price(self, price: float) -> float:
-        if price is None:
-            return 0.0
-        return round(price, self.price_precision)
+        return round(price, self.price_precision) if price else 0.0
 
-    def get_historical_klines(self, symbol: str, timeframe: str, limit: int = 500) -> pd.DataFrame:
-        """Fetches REAL historical klines from Binance Futures."""
+    def get_historical_klines(self, symbol: str = None, timeframe: str = "1m", limit: int = 500) -> pd.DataFrame:
+        """Fetch historical klines (OHLCV) from Binance Futures."""
+        symbol = symbol or self.symbol
         try:
-            klines = self.futures_client.klines(
-                symbol=symbol,
-                interval=timeframe,
-                limit=limit
-            )
-
+            klines = self.futures_client.klines(symbol=symbol, interval=timeframe, limit=limit)
             df = pd.DataFrame(klines, columns=[
                 'open_time', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_asset_volume', 'number_of_trades',
                 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
             ])
-
             df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
             df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
             df.set_index('close_time', inplace=True)
-
-            cols = ['open', 'high', 'low', 'close', 'volume']
-            df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
-
-            logger.info(f"Successfully fetched {len(df)} klines from Binance.")
+            df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].apply(pd.to_numeric, errors='coerce')
+            logger.info(f"Fetched {len(df)} klines for {symbol}.")
             return df
-
-        except BinanceAPIException as e:
-            logger.error(f"Binance API Error: {e.status_code} - {e.message}. Rate limit exceeded or invalid symbol/timeframe.")
-            return pd.DataFrame()
-        except BinanceRequestException as e:
-            logger.error(f"Binance Request Error: Network or connection issue. {e}")
+        except (BinanceAPIException, BinanceRequestException) as e:
+            logger.error(f"Binance Error: {e}")
             return pd.DataFrame()
         except Exception as e:
-            logger.error(f"An unexpected error occurred during klines fetch: {e}")
+            logger.error(f"Unexpected error fetching klines: {e}")
             return pd.DataFrame()
 
     def get_current_price(self) -> float | None:
-        """Fetches the current market price."""
+        """Fetch current market price."""
         try:
             ticker = self.futures_client.ticker_price(symbol=self.symbol)
-            price = float(ticker['price'])
-            return price
+            return self._round_price(float(ticker['price']))
         except Exception as e:
             logger.error(f"Failed to fetch current price: {e}")
             return None
