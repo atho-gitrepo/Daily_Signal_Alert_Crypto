@@ -27,7 +27,7 @@ class BinanceDataClient:
         if not self.api_key or not self.api_secret:
             logger.warning("⚠️ Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
-        # ✅ Correct UMFutures initialization
+        # ✅ Correct UMFutures initialization with 3 positional arguments
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
         self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
 
@@ -92,6 +92,13 @@ class BinanceDataClient:
             return None
 
 
+def escape_markdown(text: str) -> str:
+    """Escape Telegram MarkdownV2-sensitive characters."""
+    for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
+        text = text.replace(char, f"\\{char}")
+    return text
+
+
 def main():
     """Main entry point for Binance Data Client."""
     logger.info("🚀 Starting Binance Data Client container...")
@@ -105,18 +112,16 @@ def main():
             if price:
                 msg = f"💹 {client.symbol} current price: {price} USD"
                 logger.info(msg)
-                send_telegram_message(msg)
+                send_telegram_message(escape_markdown(msg))
             else:
                 logger.warning("⚠️ Failed to fetch price.")
 
             time.sleep(Config.POLLING_INTERVAL_SECONDS)
 
     except Exception as e:
-        # Escape periods for Telegram Markdown
-        escaped_error = str(e).replace(".", "\\.")
-        error_msg = f"🔥 Critical error in main loop: {escaped_error}"
-        logger.critical(error_msg)
-        send_telegram_message(error_msg)
+        raw_error = f"🔥 Critical error in main loop: {e}"
+        logger.critical(raw_error)
+        send_telegram_message(escape_markdown(raw_error))
 
 
 if __name__ == "__main__":
