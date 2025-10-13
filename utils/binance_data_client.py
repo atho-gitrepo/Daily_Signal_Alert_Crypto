@@ -17,7 +17,7 @@ class BinanceDataClient:
         self.api_secret = Config.BINANCE_API_SECRET
         self.is_testnet = Config.BINANCE_TESTNET
 
-        # Correct base URL usage
+        # ✅ FIXED: Correct positional arguments for UMFutures
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
         self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
 
