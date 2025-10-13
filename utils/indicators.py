@@ -1,7 +1,7 @@
 # strategy/indicators.py
 import pandas as pd
 import numpy as np
-from config import Config
+from settings import Config
 
 class Indicators:
 
