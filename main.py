@@ -1,143 +1,88 @@
-# main.py
-import time
+import pandas as pd
 import logging
-import asyncio
-from datetime import datetime
-
-from utils.binance_data_client import BinanceDataClient 
-from utils.telegram_bot import send_telegram_message_sync, send_telegram_message_async
-from strategy.consolidated_trend import ConsolidatedTrendStrategy
+from binance.client import Client
+from binance.exceptions import BinanceAPIException, BinanceRequestException
 from config import Config
 
-# Configure logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    handlers=[
-                        logging.FileHandler("bot.log"),
-                        logging.StreamHandler()
-                    ])
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
-# Helper function for escaping Markdown V2 special characters in dynamic strings
-def escape_markdown_v2(text):
-    return text.replace('.', '\.').replace('(', '\(').replace(')', '\)').replace('`', '\`')
 
-class NotificationBot:
+class BinanceDataClient:
+    """Client for fetching real-time and historical data from Binance USD-M Futures."""
+
     def __init__(self):
-        try:
-            self.data_client = BinanceDataClient() 
-        except Exception as e:
-            logger.critical(f"Failed to initialize BinanceDataClient: {e}. Exiting bot.")
-            
-            error_type = type(e).__name__
-            error_message = str(e)
-            escaped_error_message = escape_markdown_v2(error_message)
-
-            send_telegram_message_sync(f"🚨 *CRITICAL ERROR:* Bot failed to initialize Binance Data Client: `{error_type}: {escaped_error_message}`\. Bot shutting down\.")
-            exit()
-
-        self.strategy = ConsolidatedTrendStrategy()
         self.symbol = Config.SYMBOL
-        self.timeframe = Config.TIMEFRAME
+        self.api_key = Config.BINANCE_API_KEY
+        self.api_secret = Config.BINANCE_API_SECRET
+        self.is_testnet = Config.BINANCE_TESTNET
 
-        self.last_candle_close_time = None
-        self.last_sent_signal = {"type": None, "timestamp": None}
+        if not self.api_key or not self.api_secret:
+            logger.warning("Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
-        logger.info(f"Notification bot initialized for {self.symbol} on {self.timeframe} timeframe (Binance REAL Data).")
+        # Initialize official Binance Client
+        self.client = Client(self.api_key, self.api_secret, testnet=self.is_testnet)
 
-    async def run(self):
-        logger.info("Starting notification bot...")
-        
-        status_msg = f"🚀 Notification bot started for *{self.symbol}* on *{self.timeframe}* timeframe \(Binance REAL Data\)\."
-        await send_telegram_message_async(status_msg)
+        # USDⓈ-M Futures client (USDT-M Futures)
+        self.futures_client = self.client.futures
 
-        while True:
-            try:
-                # 1. Fetch data
-                df = self.data_client.get_historical_klines(self.symbol, self.timeframe)
-                
-                min_data_points = max(Config.TDI_RSI_PERIOD, Config.BB_PERIOD, Config.TDI_SLOW_MA_PERIOD) * 2
-                if df.empty or len(df) < min_data_points:
-                    logger.warning(f"Not enough historical klines ({len(df)}) for indicators to warm up (min {min_data_points})\. Retrying\.")
-                    time.sleep(Config.POLLING_INTERVAL_SECONDS)
-                    continue
+        self.price_precision = 2
+        self._get_symbol_precision()
+        logger.info(f"Binance Data Client initialized. Testnet: {self.is_testnet}")
 
-                latest_complete_candle_close_time = df.index[-1].to_pydatetime()
+    def _get_symbol_precision(self):
+        """Fetch price precision from exchange info."""
+        try:
+            info = self.futures_client.exchange_info()
+            symbol_info = next(
+                (s for s in info['symbols'] if s['symbol'] == self.symbol),
+                None
+            )
+            if symbol_info:
+                price_filter = next(
+                    (f for f in symbol_info['filters'] if f['filterType'] == 'PRICE_FILTER'),
+                    None
+                )
+                if price_filter:
+                    step_size = price_filter['tickSize']
+                    self.price_precision = len(step_size.split('.')[-1].rstrip('0'))
 
-                if self.last_candle_close_time is not None and latest_complete_candle_close_time <= self.last_candle_close_time:
-                    logger.info(f"Waiting for new candle close (last processed: {self.last_candle_close_time})\. Current candle ends at {latest_complete_candle_close_time}\.")
-                    time.sleep(Config.POLLING_INTERVAL_SECONDS)
-                    continue
+            logger.info(f"Price precision for {self.symbol}: {self.price_precision}")
+        except Exception as e:
+            logger.error(f"Could not fetch symbol precision. Defaulting to {self.price_precision}. Error: {e}")
 
-                self.last_candle_close_time = latest_complete_candle_close_time
-                logger.info(f"Processing new complete candle ending at {latest_complete_candle_close_time}")
-                
-                # Fetch current price
-                current_price = self.data_client.get_current_price()
-                if current_price is None:
-                    logger.warning("Could not get current mark price\. Proceeding with signal generation based on historical close\.")
-                    current_price = df['close'].iloc[-1] 
-                    
-                # 2. Analyze data and generate signal
-                df_indicators = self.strategy.analyze_data(df.copy())
-                signal_type, signal_details = self.strategy.generate_signal(df_indicators)
+    def _round_price(self, price: float) -> float:
+        return round(price, self.price_precision) if price else 0.0
 
-                # 3. Send Notification
-                if signal_type in ["BUY", "SELL"] and \
-                   (self.last_sent_signal["type"] != signal_type or
-                    self.last_sent_signal["timestamp"] != latest_complete_candle_close_time):
-                    
-                    logger.info(f"New {signal_type} signal detected!")
-                    
-                    price_precision = self.data_client.price_precision
-                    entry_price_display = self.data_client._round_price(signal_details.get('entry_price'))
-                    stop_loss_display = self.data_client._round_price(signal_details.get('stop_loss'))
-                    take_profit_display = self.data_client._round_price(signal_details.get('take_profit'))
-                    current_price_display = self.data_client._round_price(current_price)
+    def get_historical_klines(self, symbol: str = None, interval: str = None, limit: int = 500) -> pd.DataFrame:
+        """Fetch historical klines (OHLCV) from Binance USD-M Futures."""
+        symbol = symbol or self.symbol
+        interval = interval or Config.TIMEFRAME
+        try:
+            klines = self.futures_client.klines(symbol=symbol, interval=interval, limit=limit)
+            df = pd.DataFrame(klines, columns=[
+                'open_time', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_asset_volume', 'number_of_trades',
+                'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
+            ])
+            df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
+            df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
+            df.set_index('close_time', inplace=True)
+            df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].apply(pd.to_numeric, errors='coerce')
+            logger.info(f"Fetched {len(df)} klines for {symbol}.")
+            return df
+        except (BinanceAPIException, BinanceRequestException) as e:
+            logger.error(f"Binance Error: {e}")
+            return pd.DataFrame()
+        except Exception as e:
+            logger.error(f"Unexpected error fetching klines: {e}")
+            return pd.DataFrame()
 
-                    message = (
-                        f"🔔 *NEW {signal_type} Signal for {self.symbol} ({self.timeframe}) \(Binance REAL Data\)*\n"
-                        f"Proposed Entry: `{entry_price_display:.{price_precision}f}`\n"
-                        f"Proposed Stop Loss: `{stop_loss_display:.{price_precision}f}`\n"
-                        f"Proposed Take Profit: `{take_profit_display:.{price_precision}f}`\n"
-                        f"TDI: `{signal_details.get('tdi_value', 0.0):.2f}`\n"
-                        f"Risk Factor: `{signal_details.get('risk_factor', 1.0)}x` \(Strategy's internal risk estimate\)\n"
-                        f"Current Market Price: `{current_price_display:.{price_precision}f}` \(Live via Binance\)"
-                    )
-                    
-                    await send_telegram_message_async(message)
-                    
-                    self.last_sent_signal["type"] = signal_type
-                    self.last_sent_signal["timestamp"] = latest_complete_candle_close_time
-                else:
-                    logger.info(f"No new signal or signal already notified for candle ending {latest_complete_candle_close_time}\.")
-
-            except Exception as e:
-                logger.exception(f"An unexpected error occurred in main loop: {e}")
-                
-                error_type = type(e).__name__
-                error_message = str(e)
-                escaped_error_message = escape_markdown_v2(error_message)
-
-                await send_telegram_message_async(f"🚨 *Bot Error!* An unexpected error occurred: `{error_type}: {escaped_error_message}`")
-
-            finally:
-                logger.info(f"Sleeping for {Config.POLLING_INTERVAL_SECONDS} seconds...")
-                time.sleep(Config.POLLING_INTERVAL_SECONDS)
-
-
-if __name__ == "__main__":
-    bot = NotificationBot()
-    try:
-        asyncio.run(bot.run())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user (KeyboardInterrupt)\.")
-        send_telegram_message_sync("👋 Notification bot stopped by user\.")
-    except Exception as e:
-        logger.exception("Fatal error, bot shutting down\.")
-        
-        error_type = type(e).__name__
-        error_message = str(e)
-        escaped_error_message = escape_markdown_v2(error_message)
-
-        send_telegram_message_sync(f"❌ *Fatal Bot Error!* Bot has shut down: `{error_type}: {escaped_error_message}`")
+    def get_current_price(self) -> float | None:
+        """Fetch current market price."""
+        try:
+            ticker = self.futures_client.ticker_price(symbol=self.symbol)
+            return self._round_price(float(ticker['price']))
+        except Exception as e:
+            logger.error(f"Failed to fetch current price: {e}")
+            return None
