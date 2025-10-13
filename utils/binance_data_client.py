@@ -2,7 +2,7 @@
 import pandas as pd
 import logging
 # Use the dedicated UM_Futures client for robustness
-from binance.um_futures import UM_Futures  
+from binance.um_futures import UMFutures  
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from config import Config
 
