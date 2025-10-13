@@ -3,13 +3,10 @@ import time
 import logging
 from settings import Config
 from utils.telegram_bot import send_telegram_message_sync as send_telegram_message
-from binance.client import Client
-# 🎯 FIX 1: Import FuturesClient
-from binance.futures import FuturesClient 
+from binance.um_futures import UMFutures
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from datetime import datetime
 import pandas as pd
-
 
 # Configure logging
 logging.basicConfig(
@@ -31,12 +28,9 @@ class BinanceDataClient:
         if not self.api_key or not self.api_secret:
             logger.warning("⚠️ Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
-        # Initialize official Binance Client (Optional, only needed for Spot/Margin)
-        self.client = Client(self.api_key, self.api_secret, testnet=self.is_testnet)
-        
-        # 🎯 FIX 2: Initialize FuturesClient directly
-        # We must use FuturesClient() instead of trying to access '.futures' on the generic Client object.
-        self.futures_client = FuturesClient(key=self.api_key, secret=self.api_secret, testnet=self.is_testnet)
+        # ✅ Use correct base URL and positional arguments
+        base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
+        self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
 
         self.price_precision = 2
         self._get_symbol_precision()
