@@ -1,20 +1,15 @@
-# utils/coingecko_data_client.py
-
 import logging
 import pandas as pd
 import httpx
 import time
 from datetime import datetime
+from httpx import HTTPStatusError # Import specific error class
 
 logger = logging.getLogger(__name__)
 
-# CoinGecko's free API is limited. We'll use the price endpoint for current price
-# and provide mock data for historical klines since OHLCV is not directly available 
-# on the simple price endpoint.
 COINGECKO_API_URL = "https://api.coingecko.com/api/v3/simple/price"
-# Parameters for BTC/USDT and ETH/USDT prices and 24h volume
 COINGECKO_PARAMS = {
-    'ids': 'bitcoin',  # CoinGecko only provides BTC/ETH. We'll use BTC as a stand-in.
+    'ids': 'bitcoin', 
     'vs_currencies': 'usd',
     'include_24hr_vol': 'true'
 }
@@ -22,16 +17,14 @@ COINGECKO_PARAMS = {
 class CoinGeckoDataClient:
     """
     A client for fetching data from the CoinGecko API.
-    It replaces the Binance client, using mock historical data where needed.
+    Uses caching and fetches price only once per loop to prevent 429 rate limit errors.
     """
     def __init__(self, symbol="BTCUSDT", price_precision=2):
-        self.symbol = symbol # e.g., 'BTCUSDT'
-        self.price_precision = price_precision # Used for formatting in main.py
-        
-        # NOTE: We assume 'bitcoin' is the proxy for your main symbol (BTCUSDT)
-        # due to CoinGecko limitations.
+        self.symbol = symbol 
+        self.price_precision = price_precision 
         self.coingecko_id = 'bitcoin'
-        
+        self._cached_current_price = None 
+        self._last_price_fetch_time = 0   
         logger.info(f"CoinGecko Data Client initialized for {self.symbol}.")
         
     def _round_price(self, price: float) -> float:
@@ -40,12 +33,9 @@ class CoinGeckoDataClient:
             return 0.0
         return round(price, self.price_precision)
 
-    def get_current_price(self) -> float | None:
-        """
-        Fetches the current ticker price for the configured symbol synchronously.
-        """
+    def _fetch_real_current_price(self) -> float | None:
+        """Internal method to fetch price from CoinGecko, update cache, with error handling."""
         try:
-            # Synchronous request using httpx for simplicity in this utility file
             with httpx.Client(timeout=10) as client:
                 response = client.get(COINGECKO_API_URL, params=COINGECKO_PARAMS)
                 response.raise_for_status()
@@ -54,11 +44,17 @@ class CoinGeckoDataClient:
                 price = data.get(self.coingecko_id, {}).get('usd')
                 
                 if price is not None:
-                    return float(price)
+                    self._cached_current_price = float(price)
+                    self._last_price_fetch_time = time.time()
+                    return self._cached_current_price
                 
                 logger.warning(f"Price data not found for {self.coingecko_id} in CoinGecko response.")
                 return None
                 
+        except HTTPStatusError as e:
+            # Catch and log 429 explicitly
+            logger.error(f"CoinGecko API error {e.response.status_code} fetching price: {e}")
+            return None
         except httpx.RequestError as e:
             logger.error(f"Network error fetching price from CoinGecko: {e}")
             return None
@@ -66,22 +62,30 @@ class CoinGeckoDataClient:
             logger.error(f"Unexpected error fetching price from CoinGecko: {e}")
             return None
 
+    def get_current_price(self) -> float | None:
+        """
+        Returns the cached current ticker price, fetched during the historical klines call.
+        """
+        return self._cached_current_price
+
     def get_historical_klines(self, symbol: str, timeframe: str, limit: int = 500) -> pd.DataFrame:
         """
-        Fetches historical data. WARNING: This returns MOCK/PLACEHOLDER data 
-        because CoinGecko's simple API does not offer OHLCV klines. 
-        Your strategy indicators will likely need real data to work correctly.
+        Fetches current price to use as basis, then generates MOCK historical data.
+        This is the only method that calls the CoinGecko API (via _fetch_real_current_price).
         """
         logger.warning("Using MOCK data for historical klines because CoinGecko's simple API lacks OHLCV data. Strategy indicators will be unreliable.")
         
-        # Get the latest real price for a basis
-        latest_close = self.get_current_price()
+        # 1. Update the cached price once at the start of the loop
+        latest_close = self._fetch_real_current_price()
+        
         if latest_close is None:
-            latest_close = 4500.0 # Fallback close if API fails
-            
+            # Fallback if API fails (will use the last known price or a default)
+            latest_close = self._cached_current_price if self._cached_current_price is not None else 45000.0
+            logger.warning(f"CoinGecko fetch failed. Using last known/default price: {latest_close}")
+
         current_time = datetime.now()
         
-        # Generate 'limit' mock candles ending now
+        # 2. Generate 'limit' mock candles based on the fetched price
         data = []
         for i in range(limit, 0, -1):
             # Create a plausible but mock open, high, low based on the latest close
