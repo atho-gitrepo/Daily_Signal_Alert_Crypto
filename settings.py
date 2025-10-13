@@ -2,7 +2,6 @@ import pandas as pd
 import logging
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceRequestException
-from settings import Config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
