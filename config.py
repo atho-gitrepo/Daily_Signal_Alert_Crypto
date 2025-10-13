@@ -1,7 +1,9 @@
+# config.py
 import os
 
 class Config:
     # ------------------- Binance API Credentials (Optional, for higher rate limits) -------------------
+    # NOTE: These MUST be set in your environment for REAL trading.
     BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
     BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
     BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "False").lower() in ("true", "1", "t")
@@ -11,7 +13,6 @@ class Config:
     TIMEFRAME: str = os.getenv("TIMEFRAME", "15m") # Candlestick interval (e.g., '1m', '15m', '1h')
 
     # ----------------------- Polling Interval ----------------------
-    # Increased to 60 seconds to respect API rate limits.
     POLLING_INTERVAL_SECONDS: int = int(os.getenv("POLLING_INTERVAL_SECONDS", "60")) 
 
     # --------------------- Strategy Parameters ---------------------
