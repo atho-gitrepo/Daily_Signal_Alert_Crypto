@@ -1,9 +1,9 @@
+# main.py
 import time
 import logging
 import asyncio
 from datetime import datetime
 
-# --- NEW CLIENT IMPORT ---
 from utils.binance_data_client import BinanceDataClient 
 from utils.telegram_bot import send_telegram_message_sync, send_telegram_message_async
 from strategy.consolidated_trend import ConsolidatedTrendStrategy
@@ -18,18 +18,20 @@ logging.basicConfig(level=logging.INFO,
                     ])
 logger = logging.getLogger(__name__)
 
+# Helper function for escaping Markdown V2 special characters in dynamic strings
+def escape_markdown_v2(text):
+    return text.replace('.', '\.').replace('(', '\(').replace(')', '\)').replace('`', '\`')
+
 class NotificationBot:
     def __init__(self):
         try:
-            # --- USE BINANCE CLIENT ---
             self.data_client = BinanceDataClient() 
         except Exception as e:
             logger.critical(f"Failed to initialize BinanceDataClient: {e}. Exiting bot.")
             
-            # Get and escape the error message for MarkdownV2 compliance
             error_type = type(e).__name__
             error_message = str(e)
-            escaped_error_message = error_message.replace('.', '\.').replace('(', '\(').replace(')', '\)').replace('`', '\`')
+            escaped_error_message = escape_markdown_v2(error_message)
 
             send_telegram_message_sync(f"🚨 *CRITICAL ERROR:* Bot failed to initialize Binance Data Client: `{error_type}: {escaped_error_message}`\. Bot shutting down\.")
             exit()
@@ -46,7 +48,6 @@ class NotificationBot:
     async def run(self):
         logger.info("Starting notification bot...")
         
-        # FIX: Escape parentheses and period for MarkdownV2
         status_msg = f"🚀 Notification bot started for *{self.symbol}* on *{self.timeframe}* timeframe \(Binance REAL Data\)\."
         await send_telegram_message_async(status_msg)
 
@@ -88,7 +89,6 @@ class NotificationBot:
                     
                     logger.info(f"New {signal_type} signal detected!")
                     
-                    # Prepare message with escaped punctuation for MarkdownV2
                     price_precision = self.data_client.price_precision
                     entry_price_display = self.data_client._round_price(signal_details.get('entry_price'))
                     stop_loss_display = self.data_client._round_price(signal_details.get('stop_loss'))
@@ -115,10 +115,9 @@ class NotificationBot:
             except Exception as e:
                 logger.exception(f"An unexpected error occurred in main loop: {e}")
                 
-                # FIX: Escape all punctuation in the error message for MarkdownV2
                 error_type = type(e).__name__
                 error_message = str(e)
-                escaped_error_message = error_message.replace('.', '\.').replace('(', '\(').replace(')', '\)').replace('`', '\`')
+                escaped_error_message = escape_markdown_v2(error_message)
 
                 await send_telegram_message_async(f"🚨 *Bot Error!* An unexpected error occurred: `{error_type}: {escaped_error_message}`")
 
@@ -137,9 +136,8 @@ if __name__ == "__main__":
     except Exception as e:
         logger.exception("Fatal error, bot shutting down\.")
         
-        # FIX: Escape all punctuation in the critical sync error message
         error_type = type(e).__name__
         error_message = str(e)
-        escaped_error_message = error_message.replace('.', '\.').replace('(', '\(').replace(')', '\)').replace('`', '\`')
+        escaped_error_message = escape_markdown_v2(error_message)
 
         send_telegram_message_sync(f"❌ *Fatal Bot Error!* Bot has shut down: `{error_type}: {escaped_error_message}`")
