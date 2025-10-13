@@ -27,7 +27,7 @@ class BinanceDataClient:
         if not self.api_key or not self.api_secret:
             logger.warning("⚠️ Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
-        # ✅ FIXED: Use only 3 positional arguments
+        # ✅ Correct UMFutures initialization
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
         self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
 
@@ -112,11 +112,11 @@ def main():
             time.sleep(Config.POLLING_INTERVAL_SECONDS)
 
     except Exception as e:
-    escaped_error = str(e).replace(".", "\\.")
-    error_msg = f"🔥 Critical error in main loop: {escaped_error}"
-    logger.critical(error_msg)
-    send_telegram_message(error_msg)
-
+        # Escape periods for Telegram Markdown
+        escaped_error = str(e).replace(".", "\\.")
+        error_msg = f"🔥 Critical error in main loop: {escaped_error}"
+        logger.critical(error_msg)
+        send_telegram_message(error_msg)
 
 
 if __name__ == "__main__":
