@@ -1,7 +1,8 @@
-# utils/binance_data_client.py
+# utils/binance_data_client.py (Final Fixed Version)
 import pandas as pd
 import logging
-from binance.client import Client 
+# Use the dedicated UM_Futures client for robustness
+from binance.um_futures import UM_Futures  
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from config import Config
 
@@ -9,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 class BinanceDataClient:
     """
-    Client for fetching REAL data (klines and price) from Binance Futures.
+    Client for fetching REAL data (klines and price) from Binance USD-M Futures.
+    Uses the dedicated UM_Futures client to avoid the 'futures' attribute error.
     """
     def __init__(self):
         self.symbol = Config.SYMBOL
@@ -17,15 +19,13 @@ class BinanceDataClient:
         self.api_secret = Config.BINANCE_API_SECRET
         self.is_testnet = Config.BINANCE_TESTNET
         
-        # --- FIX: Initialize Client without 'base_url' ---
-        self.client = Client(
-            self.api_key, 
-            self.api_secret, 
-            tld='com'
+        # --- FIX: Use dedicated UM_Futures Client ---
+        self.futures_client = UM_Futures(
+            key=self.api_key, 
+            secret=self.api_secret, 
+            # Configure base URL for Testnet if the flag is set
+            base_url="https://testnet.binancefuture.com" if self.is_testnet else None
         )
-        
-        # Access the futures specific client
-        self.futures_client = self.client.futures
         
         self.price_precision = 2 
         
@@ -38,7 +38,7 @@ class BinanceDataClient:
     def _get_symbol_precision(self):
         """Fetches the price precision from exchange info."""
         try:
-            info = self.futures_client.get_exchange_info()
+            info = self.futures_client.exchange_info()
             symbol_info = next(
                 (s for s in info['symbols'] if s['symbol'] == self.symbol), 
                 None
@@ -56,7 +56,6 @@ class BinanceDataClient:
             logger.error(f"Could not fetch symbol precision. Defaulting to {self.price_precision}. Error: {e}")
     
     def _round_price(self, price: float) -> float:
-        """Utility for rounding price based on fetched precision."""
         if price is None:
             return 0.0
         return round(price, self.price_precision)
@@ -99,7 +98,7 @@ class BinanceDataClient:
     def get_current_price(self) -> float | None:
         """Fetches the current market price."""
         try:
-            ticker = self.futures_client.get_symbol_ticker(symbol=self.symbol)
+            ticker = self.futures_client.ticker_price(symbol=self.symbol)
             price = float(ticker['price'])
             return price
         except Exception as e:
