@@ -1,7 +1,6 @@
 import pandas as pd
 import logging
-# Use the dedicated UM_Futures client for robustness
-from binance.um_futures import UMFutures  
+from binance.um_futures import UMFutures
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from config import Config
 
@@ -10,27 +9,23 @@ logger = logging.getLogger(__name__)
 class BinanceDataClient:
     """
     Client for fetching REAL data (klines and price) from Binance USD-M Futures.
-    Uses the dedicated UM_Futures client to avoid the 'futures' attribute error.
+    Uses the dedicated UMFutures client to avoid the 'futures' attribute error.
     """
     def __init__(self):
         self.symbol = Config.SYMBOL
         self.api_key = Config.BINANCE_API_KEY
         self.api_secret = Config.BINANCE_API_SECRET
         self.is_testnet = Config.BINANCE_TESTNET
-        
-        # --- FIX: Use dedicated UM_Futures Client ---
-        self.futures_client = UMFutures(
-            key=self.api_key, 
-            secret=self.api_secret, 
-            # Configure base URL for Testnet if the flag is set
-            base_url="https://testnet.binancefuture.com" if self.is_testnet else None
-        )
-        
-        self.price_precision = 2 
-        
+
+        # Correct base URL usage
+        base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
+        self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
+
+        self.price_precision = 2
+
         logger.info(f"Binance Data Client initialized. Testnet: {self.is_testnet}")
         if not self.api_key:
-             logger.warning("Binance API Key is NOT set. Using public endpoints (lower rate limit).")
+            logger.warning("Binance API Key is NOT set. Using public endpoints (lower rate limit).")
 
         self._get_symbol_precision()
 
@@ -39,21 +34,21 @@ class BinanceDataClient:
         try:
             info = self.futures_client.exchange_info()
             symbol_info = next(
-                (s for s in info['symbols'] if s['symbol'] == self.symbol), 
+                (s for s in info['symbols'] if s['symbol'] == self.symbol),
                 None
             )
             if symbol_info:
                 price_filter = next(
-                    (f for f in symbol_info['filters'] if f['filterType'] == 'PRICE_FILTER'), 
+                    (f for f in symbol_info['filters'] if f['filterType'] == 'PRICE_FILTER'),
                     None
                 )
                 if price_filter:
                     step_size = price_filter['tickSize']
                     self.price_precision = len(step_size.split('.')[-1].rstrip('0'))
-            
+
         except Exception as e:
             logger.error(f"Could not fetch symbol precision. Defaulting to {self.price_precision}. Error: {e}")
-    
+
     def _round_price(self, price: float) -> float:
         if price is None:
             return 0.0
@@ -63,27 +58,27 @@ class BinanceDataClient:
         """Fetches REAL historical klines from Binance Futures."""
         try:
             klines = self.futures_client.klines(
-                symbol=symbol, 
-                interval=timeframe, 
+                symbol=symbol,
+                interval=timeframe,
                 limit=limit
             )
-            
+
             df = pd.DataFrame(klines, columns=[
-                'open_time', 'open', 'high', 'low', 'close', 'volume', 
-                'close_time', 'quote_asset_volume', 'number_of_trades', 
+                'open_time', 'open', 'high', 'low', 'close', 'volume',
+                'close_time', 'quote_asset_volume', 'number_of_trades',
                 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
             ])
-            
+
             df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
             df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
             df.set_index('close_time', inplace=True)
-            
+
             cols = ['open', 'high', 'low', 'close', 'volume']
             df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
-            
+
             logger.info(f"Successfully fetched {len(df)} klines from Binance.")
             return df
-            
+
         except BinanceAPIException as e:
             logger.error(f"Binance API Error: {e.status_code} - {e.message}. Rate limit exceeded or invalid symbol/timeframe.")
             return pd.DataFrame()
