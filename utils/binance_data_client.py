@@ -5,25 +5,32 @@ from binance.exceptions import BinanceAPIException, BinanceRequestException
 from config import Config
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)  # Ensure logging is visible
 
 class BinanceDataClient:
     """
     Client for fetching REAL data (klines and price) from Binance USD-M Futures.
     Uses the dedicated UMFutures client to avoid the 'futures' attribute error.
     """
+
     def __init__(self):
         self.symbol = Config.SYMBOL
         self.api_key = Config.BINANCE_API_KEY
         self.api_secret = Config.BINANCE_API_SECRET
         self.is_testnet = Config.BINANCE_TESTNET
 
-        # ✅ FIXED: Correct positional arguments for UMFutures
+        # ✅ FIXED: Correct initialization with keyword argument for base_url
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
-        self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
+        self.futures_client = UMFutures(
+            api_key=self.api_key,
+            api_secret=self.api_secret,
+            base_url=base_url
+        )
 
         self.price_precision = 2
 
         logger.info(f"Binance Data Client initialized. Testnet: {self.is_testnet}")
+
         if not self.api_key:
             logger.warning("Binance API Key is NOT set. Using public endpoints (lower rate limit).")
 
@@ -45,6 +52,8 @@ class BinanceDataClient:
                 if price_filter:
                     step_size = price_filter['tickSize']
                     self.price_precision = len(step_size.split('.')[-1].rstrip('0'))
+
+            logger.info(f"Price precision for {self.symbol}: {self.price_precision}")
 
         except Exception as e:
             logger.error(f"Could not fetch symbol precision. Defaulting to {self.price_precision}. Error: {e}")
@@ -76,7 +85,7 @@ class BinanceDataClient:
             cols = ['open', 'high', 'low', 'close', 'volume']
             df[cols] = df[cols].apply(pd.to_numeric, errors='coerce')
 
-            logger.info(f"Successfully fetched {len(df)} klines from Binance.")
+            logger.info(f"Successfully fetched {len(df)} klines from Binance for {symbol}.")
             return df
 
         except BinanceAPIException as e:
@@ -94,7 +103,7 @@ class BinanceDataClient:
         try:
             ticker = self.futures_client.ticker_price(symbol=self.symbol)
             price = float(ticker['price'])
-            return price
+            return self._round_price(price)
         except Exception as e:
             logger.error(f"Failed to fetch current price: {e}")
             return None
