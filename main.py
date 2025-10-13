@@ -5,7 +5,6 @@ from settings import Config
 from utils.telegram_bot import send_telegram_message_sync as send_telegram_message
 from binance.um_futures import UMFutures
 from binance.exceptions import BinanceAPIException, BinanceRequestException
-from datetime import datetime
 import pandas as pd
 
 # Configure logging
@@ -28,7 +27,7 @@ class BinanceDataClient:
         if not self.api_key or not self.api_secret:
             logger.warning("⚠️ Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
-        # ✅ Use correct base URL and positional arguments
+        # ✅ FIXED: Use only 3 positional arguments
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
         self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
 
@@ -99,7 +98,7 @@ def main():
 
     try:
         client = BinanceDataClient()
-        send_telegram_message("✅ Binance Data Client started successfully!")  # optional
+        send_telegram_message("✅ Binance Data Client started successfully!")
 
         while True:
             price = client.get_current_price()
@@ -113,7 +112,7 @@ def main():
             time.sleep(Config.POLLING_INTERVAL_SECONDS)
 
     except Exception as e:
-        error_msg = f"🔥 Critical error in main loop: {e}"
+        error_msg = f"🔥 Critical error in main loop: {str(e).replace('.', '\\.')}"
         logger.critical(error_msg)
         send_telegram_message(error_msg)
 
