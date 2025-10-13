@@ -1,4 +1,3 @@
-# main.py
 import time
 import logging
 from settings import Config
@@ -29,8 +28,7 @@ class BinanceDataClient:
 
         # ✅ Correct UMFutures initialization with 3 positional arguments
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
-		self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
-
+        self.futures_client = UMFutures(base_url, self.api_key, self.api_secret)
 
         self.price_precision = 2
         self._get_symbol_precision()
