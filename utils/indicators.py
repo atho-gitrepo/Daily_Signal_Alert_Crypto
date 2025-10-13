@@ -12,7 +12,6 @@ class Indicators:
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
 
-        # Standard rolling mean RSI calculation
         avg_gain = gain.rolling(window=period, min_periods=period).mean() 
         avg_loss = loss.rolling(window=period, min_periods=period).mean()
 
@@ -25,7 +24,6 @@ class Indicators:
     def calculate_sma(df, column, period):
         """Calculates Simple Moving Average."""
         ma_col_name = f'{column}_sma_{period}'
-        # min_periods=period ensures that the MA is only calculated when we have enough data
         df[ma_col_name] = df[column].rolling(window=period, min_periods=period).mean() 
         return df, ma_col_name
 
@@ -50,7 +48,7 @@ class Indicators:
         df['tdi_slow_ma'] = df[slow_ma_col]
 
         # 5. Calculate Volatility Bands (Bollinger Bands on RSI)
-        # FIX: Using TDI_RSI_PERIOD for the volatility bands (standard TDI definition)
+        # Using TDI_RSI_PERIOD for the volatility bands (standard TDI definition)
         bb_period = Config.TDI_RSI_PERIOD
         
         # Calculate Middle Band (SMA of RSI)
