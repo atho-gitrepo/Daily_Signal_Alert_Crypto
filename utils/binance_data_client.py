@@ -3,7 +3,7 @@ import pandas as pd
 import logging
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceRequestException
-from config import Config  # ✅ Correct import — no circular reference
+from settings import Config  # ✅ Correct import — no circular reference
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
