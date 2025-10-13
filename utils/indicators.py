@@ -1,4 +1,4 @@
-# utils/indicators.py (formerly indicator.py)
+# strategy/indicators.py
 import pandas as pd
 import numpy as np
 from config import Config
@@ -12,8 +12,7 @@ class Indicators:
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
 
-        # Use ewm (Exponentially Weighted Moving Average) for RS, which is more common 
-        # and more accurate for RSI than simple rolling mean, but your rolling mean logic is maintained for consistency:
+        # Standard rolling mean RSI calculation
         avg_gain = gain.rolling(window=period, min_periods=period).mean() 
         avg_loss = loss.rolling(window=period, min_periods=period).mean()
 
@@ -25,16 +24,15 @@ class Indicators:
     @staticmethod
     def calculate_sma(df, column, period):
         """Calculates Simple Moving Average."""
-        # Use a consistent naming convention that doesn't rely on f-string in return
         ma_col_name = f'{column}_sma_{period}'
-        df[ma_col_name] = df[column].rolling(window=period, min_periods=period).mean()
+        # min_periods=period ensures that the MA is only calculated when we have enough data
+        df[ma_col_name] = df[column].rolling(window=period, min_periods=period).mean() 
         return df, ma_col_name
 
     @staticmethod
     def calculate_super_tdi(df):
         """
         Calculates the Super Traders Dynamic Index (TDI) components.
-        Adds 'rsi', 'tdi_price_ma', 'tdi_fast_ma', 'tdi_slow_ma', 'tdi_bb_upper', 'tdi_bb_lower' to DataFrame.
         """
         # 1. Calculate RSI
         df = Indicators.calculate_rsi(df, period=Config.TDI_RSI_PERIOD)
@@ -52,8 +50,8 @@ class Indicators:
         df['tdi_slow_ma'] = df[slow_ma_col]
 
         # 5. Calculate Volatility Bands (Bollinger Bands on RSI)
-        # --- FIX APPLIED HERE: Using TDI_RSI_PERIOD for the volatility bands ---
-        bb_period = Config.TDI_RSI_PERIOD # Standard TDI uses the RSI period for its BB
+        # FIX: Using TDI_RSI_PERIOD for the volatility bands (standard TDI definition)
+        bb_period = Config.TDI_RSI_PERIOD
         
         # Calculate Middle Band (SMA of RSI)
         df, middle_bb_col = Indicators.calculate_sma(df, 'rsi', bb_period)
@@ -75,7 +73,6 @@ class Indicators:
     def calculate_super_bollinger_bands(df):
         """
         Calculates Super Bollinger Bands.
-        Adds 'bb_middle', 'bb_upper', 'bb_lower', 'bb_buy_signal', 'bb_sell_signal' to DataFrame.
         """
         bb_period = Config.BB_PERIOD
         
@@ -86,8 +83,8 @@ class Indicators:
 
         # Basic BB Buy/Sell signals based on candle close relative to bands
         df['bb_buy_signal'] = (df['close'] < df['bb_lower']) & \
-                              (df['close'].shift(1) >= df['bb_lower'].shift(1)) # Close below lower band from above
+                              (df['close'].shift(1) >= df['bb_lower'].shift(1)) 
         df['bb_sell_signal'] = (df['close'] > df['bb_upper']) & \
-                               (df['close'].shift(1) <= df['bb_upper'].shift(1)) # Close above upper band from below
+                               (df['close'].shift(1) <= df['bb_upper'].shift(1)) 
 
         return df.drop(columns=['bb_std'], errors='ignore')
