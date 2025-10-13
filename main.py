@@ -102,9 +102,20 @@ class BinanceDataClient:
 
 def escape_markdown(text: str) -> str:
     """Escape Telegram MarkdownV2-sensitive characters."""
-    for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
-        text = text.replace(char, f"\\{char}")
+    # List of characters that need escaping in MarkdownV2
+    escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in escape_chars:
+        text = text.replace(char, f'\\{char}')
     return text
+
+
+def safe_send_telegram_message(message: str):
+    """Safely send Telegram message with error handling."""
+    try:
+        escaped_message = escape_markdown(message)
+        send_telegram_message(escaped_message)
+    except Exception as e:
+        logger.error(f"❌ Failed to send Telegram message: {e}")
 
 
 def main():
@@ -113,14 +124,14 @@ def main():
 
     try:
         client = BinanceDataClient()
-        send_telegram_message("✅ Binance Data Client started successfully!")
+        safe_send_telegram_message("✅ Binance Data Client started successfully")
 
         while True:
             price = client.get_current_price()
             if price:
                 msg = f"💹 {client.symbol} current price: {price} USD"
                 logger.info(msg)
-                send_telegram_message(escape_markdown(msg))
+                safe_send_telegram_message(msg)
             else:
                 logger.warning("⚠️ Failed to fetch price.")
 
@@ -129,7 +140,7 @@ def main():
     except Exception as e:
         raw_error = f"🔥 Critical error in main loop: {e}"
         logger.critical(raw_error)
-        send_telegram_message(escape_markdown(raw_error))
+        safe_send_telegram_message(raw_error)
 
 
 if __name__ == "__main__":
