@@ -2,5 +2,5 @@ python-telegram-bot
 pandas
 numpy
 ccxt
-python-binance
+python-binance>=1.0.19
 httpx
