@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 from utils.indicators import Indicators
-from config import Config
+from settings import Config
 import logging
 
 logger = logging.getLogger(__name__)
