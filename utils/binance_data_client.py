@@ -15,8 +15,6 @@ class BinanceDataClient:
     """
     def __init__(self):
         # 1. Initialize CCXT client
-        # The 'options' dictionary specifies the exchange type (future) and URL.
-        # This makes the client flexible to both live and testnet.
         self.client = ccxt.binance({
             'apiKey': Config.BINANCE_API_KEY,
             'secret': Config.BINANCE_API_SECRET,
@@ -24,6 +22,13 @@ class BinanceDataClient:
                 'defaultType': 'future',
                 'recvWindow': 60000,
             },
+            # --- START OF FIX: ADDING USER-AGENT HEADER ---
+            'headers': {
+                # This User-Agent header helps requests bypass blocks 
+                # often imposed by CDNs (like CloudFront) on cloud/data center IPs.
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            },
+            # --- END OF FIX ---
             'urls': {
                 'api': {
                     'fapiPublic': Config.BINANCE_FUTURES_API_URL,
@@ -36,7 +41,8 @@ class BinanceDataClient:
         self.timeframe = Config.TIMEFRAME
         
         try:
-            self.client.load_markets() # Load all markets to get info for the symbol
+            # This call caused the 403 Forbidden error, which should now be resolved
+            self.client.load_markets() 
             self.market_info = self.client.market(self.symbol)
             if not self.market_info:
                 raise RuntimeError(f"Could not retrieve market info for {self.symbol}")
