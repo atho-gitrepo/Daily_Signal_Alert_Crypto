@@ -1,7 +1,7 @@
 import pandas as pd
 import logging
 # Use the dedicated UM_Futures client for robustness
-from binance.um_futures import UM_Futures  
+from binance.um_futures import UMFutures  
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from config import Config
 
@@ -19,7 +19,7 @@ class BinanceDataClient:
         self.is_testnet = Config.BINANCE_TESTNET
         
         # --- FIX: Use dedicated UM_Futures Client ---
-        self.futures_client = UM_Futures(
+        self.futures_client = UMFutures(
             key=self.api_key, 
             secret=self.api_secret, 
             # Configure base URL for Testnet if the flag is set
