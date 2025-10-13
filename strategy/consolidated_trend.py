@@ -7,8 +7,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# --- Standardized Risk/Reward Ratio ---
-RRR_RATIO = 1.5 # Target a 1.5:1 Risk-to-Reward Ratio
+RRR_RATIO = 1.5 
 
 class ConsolidatedTrendStrategy:
     def __init__(self):
@@ -17,15 +16,12 @@ class ConsolidatedTrendStrategy:
     def analyze_data(self, df):
         """
         Applies all indicators and prepares data for signal generation.
-        Returns the DataFrame with all indicator values.
         """
         if df.empty:
             return df
 
-        # Ensure correct column names
         df.columns = [col.lower() for col in df.columns]
 
-        # Calculate Super TDI and Super Bollinger Bands
         df = Indicators.calculate_super_tdi(df.copy())
         df = Indicators.calculate_super_bollinger_bands(df.copy())
 
@@ -38,10 +34,8 @@ class ConsolidatedTrendStrategy:
         Calculates structural Stop Loss and Take Profit based on recent swing high/low 
         and a fixed RRR_RATIO.
         """
-        # Use the close of the signal candle as entry proxy
         entry_price = last_candle['close'] 
         lookback_period = 10
-        # Lookback range: up to and including the current candle
         start_index = max(0, len(df) - lookback_period) 
         lookback_df = df.iloc[start_index:]
 
@@ -52,7 +46,6 @@ class ConsolidatedTrendStrategy:
             if stop_loss >= entry_price:
                 stop_loss = entry_price * 0.995 # Fallback
 
-            # Calculate SL distance and TP based on RRR
             sl_distance = entry_price - stop_loss
             take_profit = entry_price + (sl_distance * RRR_RATIO * risk_factor)
 
@@ -63,7 +56,6 @@ class ConsolidatedTrendStrategy:
             if stop_loss <= entry_price:
                 stop_loss = entry_price * 1.005 # Fallback
             
-            # Calculate SL distance and TP based on RRR
             sl_distance = stop_loss - entry_price
             take_profit = entry_price - (sl_distance * RRR_RATIO * risk_factor)
 
@@ -97,17 +89,13 @@ class ConsolidatedTrendStrategy:
         
         risk_factor = 1.0
 
-        # Consolidation check for later NO_TRADE
         is_consolidating_tdi = (Config.TDI_NO_TRADE_ZONE_START <= current_tdi_rsi <= Config.TDI_NO_TRADE_ZONE_END) and \
                                (abs(current_tdi_fast_ma - current_tdi_slow_ma) < 0.5)
 
         # --- Buy (Long) Signal Check ---
-
         is_tdi_bullish_crossover = (current_tdi_fast_ma > current_tdi_slow_ma and
                                     prev_tdi_fast_ma <= prev_tdi_slow_ma)
-        
         is_tdi_in_buy_zone = (current_tdi_rsi < 50)
-        
         is_bb_rejection_buy = (prev_candle['low'] <= prev_candle['bb_lower'] or last_candle['low'] <= current_bb_lower) and \
                               (current_close > prev_candle['close']) and \
                               (current_close > current_bb_lower)
@@ -135,12 +123,9 @@ class ConsolidatedTrendStrategy:
             }
 
         # --- Sell (Short) Signal Check ---
-
         is_tdi_bearish_crossover = (current_tdi_fast_ma < current_tdi_slow_ma and
                                     prev_tdi_fast_ma >= prev_tdi_slow_ma)
-
         is_tdi_in_sell_zone = (current_tdi_rsi > 50)
-        
         is_bb_rejection_sell = (prev_candle['high'] >= prev_candle['bb_upper'] or last_candle['high'] >= current_bb_upper) and \
                                (current_close < prev_candle['close']) and \
                                (current_close < current_bb_upper)
