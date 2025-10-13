@@ -20,7 +20,7 @@ class BinanceDataClient:
         self.is_testnet = Config.BINANCE_TESTNET
         
         # --- FIX: Use dedicated UM_Futures Client ---
-        self.futures_client = UM_Futures(
+        self.futures_client = UMFutures(
             key=self.api_key, 
             secret=self.api_secret, 
             # Configure base URL for Testnet if the flag is set
