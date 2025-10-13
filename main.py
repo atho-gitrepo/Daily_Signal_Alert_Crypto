@@ -1,11 +1,20 @@
-import pandas as pd
+# main.py
+import time
 import logging
+from settings import Config
+from utils.telegram_bot import send_telegram_message  # make sure this exists
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceRequestException
-from settings import Config
+from datetime import datetime
+import pandas as pd
 
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 class BinanceDataClient:
@@ -18,17 +27,15 @@ class BinanceDataClient:
         self.is_testnet = Config.BINANCE_TESTNET
 
         if not self.api_key or not self.api_secret:
-            logger.warning("Binance API Key/Secret not set. Using public endpoints (rate-limited).")
+            logger.warning("⚠️ Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
         # Initialize official Binance Client
         self.client = Client(self.api_key, self.api_secret, testnet=self.is_testnet)
-
-        # USDⓈ-M Futures client (USDT-M Futures)
         self.futures_client = self.client.futures
 
         self.price_precision = 2
         self._get_symbol_precision()
-        logger.info(f"Binance Data Client initialized. Testnet: {self.is_testnet}")
+        logger.info(f"✅ Binance Data Client initialized. Testnet: {self.is_testnet}")
 
     def _get_symbol_precision(self):
         """Fetch price precision from exchange info."""
@@ -46,10 +53,9 @@ class BinanceDataClient:
                 if price_filter:
                     step_size = price_filter['tickSize']
                     self.price_precision = len(step_size.split('.')[-1].rstrip('0'))
-
-            logger.info(f"Price precision for {self.symbol}: {self.price_precision}")
+            logger.info(f"ℹ️ Price precision for {self.symbol}: {self.price_precision}")
         except Exception as e:
-            logger.error(f"Could not fetch symbol precision. Defaulting to {self.price_precision}. Error: {e}")
+            logger.error(f"❌ Could not fetch symbol precision. Using default {self.price_precision}. Error: {e}")
 
     def _round_price(self, price: float) -> float:
         return round(price, self.price_precision) if price else 0.0
@@ -69,13 +75,13 @@ class BinanceDataClient:
             df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
             df.set_index('close_time', inplace=True)
             df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].apply(pd.to_numeric, errors='coerce')
-            logger.info(f"Fetched {len(df)} klines for {symbol}.")
+            logger.info(f"📊 Fetched {len(df)} klines for {symbol}.")
             return df
         except (BinanceAPIException, BinanceRequestException) as e:
-            logger.error(f"Binance Error: {e}")
+            logger.error(f"❌ Binance Error: {e}")
             return pd.DataFrame()
         except Exception as e:
-            logger.error(f"Unexpected error fetching klines: {e}")
+            logger.error(f"❌ Unexpected error fetching klines: {e}")
             return pd.DataFrame()
 
     def get_current_price(self) -> float | None:
@@ -84,5 +90,34 @@ class BinanceDataClient:
             ticker = self.futures_client.ticker_price(symbol=self.symbol)
             return self._round_price(float(ticker['price']))
         except Exception as e:
-            logger.error(f"Failed to fetch current price: {e}")
+            logger.error(f"❌ Failed to fetch current price: {e}")
             return None
+
+
+def main():
+    """Main entry point for Binance Data Client."""
+    logger.info("🚀 Starting Binance Data Client container...")
+
+    try:
+        client = BinanceDataClient()
+        send_telegram_message("✅ Binance Data Client started successfully!")  # optional
+
+        while True:
+            price = client.get_current_price()
+            if price:
+                msg = f"💹 {client.symbol} current price: {price} USD"
+                logger.info(msg)
+                send_telegram_message(msg)
+            else:
+                logger.warning("⚠️ Failed to fetch price.")
+
+            time.sleep(Config.POLLING_INTERVAL_SECONDS)
+
+    except Exception as e:
+        error_msg = f"🔥 Critical error in main loop: {e}"
+        logger.critical(error_msg)
+        send_telegram_message(error_msg)
+
+
+if __name__ == "__main__":
+    main()
