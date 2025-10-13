@@ -112,9 +112,11 @@ def main():
             time.sleep(Config.POLLING_INTERVAL_SECONDS)
 
     except Exception as e:
-        error_msg = f"🔥 Critical error in main loop: {str(e).replace('.', '\\.')}"
-        logger.critical(error_msg)
-        send_telegram_message(error_msg)
+    escaped_error = str(e).replace(".", "\\.")
+    error_msg = f"🔥 Critical error in main loop: {escaped_error}"
+    logger.critical(error_msg)
+    send_telegram_message(error_msg)
+
 
 
 if __name__ == "__main__":
