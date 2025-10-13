@@ -1,9 +1,11 @@
 # binance_client.py
 import pandas as pd
 import logging
-from binance.client import Client
+# 🎯 FIX 1: Import FuturesClient from binance.futures
+from binance.client import Client 
+from binance.futures import FuturesClient 
 from binance.exceptions import BinanceAPIException, BinanceRequestException
-from settings import Config  # ✅ Correct import — no circular reference
+from settings import Config  
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -21,11 +23,12 @@ class BinanceDataClient:
         if not self.api_key or not self.api_secret:
             logger.warning("Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
-        # ✅ Initialize Binance client
+        # ✅ Initialize generic (Spot) client (kept for completeness, though not strictly needed here)
         self.client = Client(self.api_key, self.api_secret, testnet=self.is_testnet)
 
-        # ✅ Futures (USDT-M) access
-        self.futures_client = self.client.futures
+        # 🎯 FIX 2: Initialize FuturesClient directly
+        # The generic 'Client' object does not have a '.futures' attribute.
+        self.futures_client = FuturesClient(key=self.api_key, secret=self.api_secret, testnet=self.is_testnet)
 
         self.price_precision = 2
         self._get_symbol_precision()
@@ -34,11 +37,13 @@ class BinanceDataClient:
     def _get_symbol_precision(self):
         """Fetch price precision dynamically from exchange info."""
         try:
+            # All methods are now correctly called on self.futures_client
             info = self.futures_client.exchange_info()
             symbol_info = next(
                 (s for s in info['symbols'] if s['symbol'] == self.symbol),
                 None
             )
+            # ... (rest of the method is unchanged and correct)
             if symbol_info:
                 price_filter = next(
                     (f for f in symbol_info['filters'] if f['filterType'] == 'PRICE_FILTER'),
@@ -52,6 +57,8 @@ class BinanceDataClient:
         except Exception as e:
             logger.error(f"Could not fetch symbol precision. Using default {self.price_precision}. Error: {e}")
 
+    # ... (rest of the methods are unchanged and correct, as they use self.futures_client)
+
     def _round_price(self, price: float) -> float:
         return round(price, self.price_precision) if price else 0.0
 
@@ -60,6 +67,7 @@ class BinanceDataClient:
         symbol = symbol or self.symbol
         try:
             klines = self.futures_client.klines(symbol=symbol, interval=interval, limit=limit)
+            # ... (rest of the method is unchanged)
             df = pd.DataFrame(klines, columns=[
                 'open_time', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_asset_volume', 'number_of_trades',
