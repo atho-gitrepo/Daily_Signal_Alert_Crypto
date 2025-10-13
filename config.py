@@ -1,17 +1,22 @@
+# config.py (Modified)
 import os
 
 class Config:
-    # ------------------- Data Client Configuration -------------------
-    # NOTE: Binance API credentials and URLs have been removed as 
-    # the bot now uses CoinGecko's public API for real-time price checks
-    # and mock data generation for strategy analysis.
+    # ------------------- Binance API Credentials (Optional, for higher rate limits) -------------------
+    BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
+    BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
+    BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "False").lower() in ("true", "1", "t")
+
+    # The base URL for the Binance Futures API.
+    BINANCE_FUTURES_API_URL: str = "https://testnet.binancefuture.com" if BINANCE_TESTNET else "https://fapi.binance.com"
 
     # ------------------------ Market Data --------------------------
-    SYMBOL: str = os.getenv("SYMBOL", "BTCUSDT") # Trading pair (Used for notifications and precision, assumes 'bitcoin' in CoinGecko)
+    SYMBOL: str = os.getenv("SYMBOL", "BTCUSDT") # Trading pair
     TIMEFRAME: str = os.getenv("TIMEFRAME", "15m") # Candlestick interval (e.g., '1m', '15m', '1h')
 
     # ----------------------- Polling Interval ----------------------
-    POLLING_INTERVAL_SECONDS: int = int(os.getenv("POLLING_INTERVAL_SECONDS", "30")) # How often to check for new data
+    # INCREASE THIS. 30 seconds is too aggressive for data fetching. Use 60 seconds (1 minute) minimum.
+    POLLING_INTERVAL_SECONDS: int = int(os.getenv("POLLING_INTERVAL_SECONDS", "60")) 
 
     # --------------------- Strategy Parameters ---------------------
     TDI_RSI_PERIOD: int = 20
