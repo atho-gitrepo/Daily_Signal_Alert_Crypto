@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import re
-from config import Config
+from settings import Config
 from telegram import Bot
 from telegram.constants import ParseMode 
 from telegram.error import TelegramError
