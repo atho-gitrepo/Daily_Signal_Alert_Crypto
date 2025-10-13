@@ -1,22 +1,13 @@
 import os
 
 class Config:
-    # ------------------- Binance API Credentials -------------------
-    # These are loaded from environment variables for security.
-    # Set them in your Railway project.
-    BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
-    BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
-
-    # --------------------- Binance Environment ---------------------
-    # Set to 'True' for Testnet, 'False' for Live (Production).
-    BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "False").lower() in ("true", "1", "t")
-
-    # The base URL for the Binance Futures API.
-    # It automatically selects the Testnet or Live URL based on BINANCE_TESTNET.
-    BINANCE_FUTURES_API_URL: str = "https://testnet.binancefuture.com" if BINANCE_TESTNET else "https://fapi.binance.com"
+    # ------------------- Data Client Configuration -------------------
+    # NOTE: The Binance API credentials and URLs have been removed as 
+    # the bot now uses CoinGecko's public API for real-time price checks
+    # and mock data generation for strategy analysis.
 
     # ------------------------ Market Data --------------------------
-    SYMBOL: str = os.getenv("SYMBOL", "BTCUSDT") # Trading pair
+    SYMBOL: str = os.getenv("SYMBOL", "BTCUSDT") # Trading pair (Used for notifications and precision, assumes 'bitcoin' in CoinGecko)
     TIMEFRAME: str = os.getenv("TIMEFRAME", "15m") # Candlestick interval (e.g., '1m', '15m', '1h')
 
     # ----------------------- Polling Interval ----------------------
