@@ -1,8 +1,9 @@
+# binance_client.py
 import pandas as pd
 import logging
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceRequestException
-from settings import Config
+from config import Config  # ✅ Correct import — no circular reference
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -20,18 +21,18 @@ class BinanceDataClient:
         if not self.api_key or not self.api_secret:
             logger.warning("Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
-        # Initialize official Binance Client
+        # ✅ Initialize Binance client
         self.client = Client(self.api_key, self.api_secret, testnet=self.is_testnet)
 
-        # USDⓈ-M Futures client
-        self.futures_client = self.client.futures  # For USDT-M Futures. For COIN-M, use self.client.futures_coin
+        # ✅ Futures (USDT-M) access
+        self.futures_client = self.client.futures
 
         self.price_precision = 2
         self._get_symbol_precision()
-        logger.info(f"Binance Data Client initialized. Testnet: {self.is_testnet}")
+        logger.info(f"✅ Binance Data Client initialized. Testnet: {self.is_testnet}")
 
     def _get_symbol_precision(self):
-        """Fetch price precision from exchange info."""
+        """Fetch price precision dynamically from exchange info."""
         try:
             info = self.futures_client.exchange_info()
             symbol_info = next(
@@ -49,7 +50,7 @@ class BinanceDataClient:
 
             logger.info(f"Price precision for {self.symbol}: {self.price_precision}")
         except Exception as e:
-            logger.error(f"Could not fetch symbol precision. Defaulting to {self.price_precision}. Error: {e}")
+            logger.error(f"Could not fetch symbol precision. Using default {self.price_precision}. Error: {e}")
 
     def _round_price(self, price: float) -> float:
         return round(price, self.price_precision) if price else 0.0
@@ -67,11 +68,11 @@ class BinanceDataClient:
             df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
             df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
             df.set_index('close_time', inplace=True)
-            df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].apply(pd.to_numeric, errors='coerce')
+            df[['open', 'high', 'low', 'close', 'volume']] = df[['open', 'high', 'low', 'close', 'volume']].apply(pd.to_numeric, errors='coerce')
             logger.info(f"Fetched {len(df)} klines for {symbol}.")
             return df
         except (BinanceAPIException, BinanceRequestException) as e:
-            logger.error(f"Binance Error: {e}")
+            logger.error(f"Binance API error: {e}")
             return pd.DataFrame()
         except Exception as e:
             logger.error(f"Unexpected error fetching klines: {e}")
