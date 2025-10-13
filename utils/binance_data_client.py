@@ -1,11 +1,12 @@
 import pandas as pd
 import logging
-from binance.um_futures import UMFutures
+from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 from config import Config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
 
 class BinanceDataClient:
     """Client for fetching real-time and historical data from Binance USD-M Futures."""
@@ -16,21 +17,18 @@ class BinanceDataClient:
         self.api_secret = Config.BINANCE_API_SECRET
         self.is_testnet = Config.BINANCE_TESTNET
 
-        # Correct initialization using keyword argument for base_url
-        base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
-        self.futures_client = UMFutures(
-            api_key=self.api_key,
-            api_secret=self.api_secret,
-            base_url=base_url
-        )
-
-        self.price_precision = 2
-        logger.info(f"Binance Data Client initialized. Testnet: {self.is_testnet}")
-
         if not self.api_key or not self.api_secret:
             logger.warning("Binance API Key/Secret not set. Using public endpoints (rate-limited).")
 
+        # Initialize official Binance Client
+        self.client = Client(self.api_key, self.api_secret, testnet=self.is_testnet)
+
+        # USDⓈ-M Futures client
+        self.futures_client = self.client.futures  # For USDT-M Futures. For COIN-M, use self.client.futures_coin
+
+        self.price_precision = 2
         self._get_symbol_precision()
+        logger.info(f"Binance Data Client initialized. Testnet: {self.is_testnet}")
 
     def _get_symbol_precision(self):
         """Fetch price precision from exchange info."""
@@ -56,11 +54,11 @@ class BinanceDataClient:
     def _round_price(self, price: float) -> float:
         return round(price, self.price_precision) if price else 0.0
 
-    def get_historical_klines(self, symbol: str = None, timeframe: str = "1m", limit: int = 500) -> pd.DataFrame:
-        """Fetch historical klines (OHLCV) from Binance Futures."""
+    def get_historical_klines(self, symbol: str = None, interval: str = "1m", limit: int = 500) -> pd.DataFrame:
+        """Fetch historical klines (OHLCV) from Binance USD-M Futures."""
         symbol = symbol or self.symbol
         try:
-            klines = self.futures_client.klines(symbol=symbol, interval=timeframe, limit=limit)
+            klines = self.futures_client.klines(symbol=symbol, interval=interval, limit=limit)
             df = pd.DataFrame(klines, columns=[
                 'open_time', 'open', 'high', 'low', 'close', 'volume',
                 'close_time', 'quote_asset_volume', 'number_of_trades',
