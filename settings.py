@@ -15,9 +15,9 @@ class Config:
     # ✅ NEW LINE: Define a list of symbols for high-frequency checks
     # The list is defined as a comma-separated string in the environment,
     # and splits into a list here. Using ETH and SOL first for potentially cleaner signals.
-    SYMBOLS: list[str] = os.getenv("SYMBOLS", "ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,SUIUSDT").split(',')
+    SYMBOLS: list[str] = os.getenv("SYMBOLS", "ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,SUIUSDT,AVAXUSDT,LTCUSDT").split(',')
     
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")  # Candlestick interval
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "30m")  # Candlestick interval
 
     # ----------------------- Polling Interval ----------------------
     POLLING_INTERVAL_SECONDS: int = int(os.getenv("POLLING_INTERVAL_SECONDS", "60"))
