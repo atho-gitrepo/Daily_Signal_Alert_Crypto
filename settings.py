@@ -10,7 +10,13 @@ class Config:
     BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "False").lower() in ("true", "1", "t")
 
     # ------------------------ Market Data --------------------------
-    SYMBOL: str = os.getenv("SYMBOL", "BTCUSDT")  # Trading pair
+    # ❌ OLD LINE: SYMBOL: str = os.getenv("SYMBOL", "BTCUSDT")  # Trading pair
+    
+    # ✅ NEW LINE: Define a list of symbols for high-frequency checks
+    # The list is defined as a comma-separated string in the environment,
+    # and splits into a list here. Using ETH and SOL first for potentially cleaner signals.
+    SYMBOLS: list[str] = os.getenv("SYMBOLS", "ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,SUIUSDT").split(',')
+    
     TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")  # Candlestick interval
 
     # ----------------------- Polling Interval ----------------------
