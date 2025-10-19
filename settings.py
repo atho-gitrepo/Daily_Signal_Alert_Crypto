@@ -15,7 +15,7 @@ class Config:
     # ✅ NEW LINE: Define a list of symbols for high-frequency checks
     # The list is defined as a comma-separated string in the environment,
     # and splits into a list here. Using ETH and SOL first for potentially cleaner signals.
-    SYMBOLS: list[str] = os.getenv("SYMBOLS", "ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,SUIUSDT,AVAXUSDT,LTCUSDT").split(',')
+    SYMBOLS: list[str] = os.getenv("SYMBOLS", "ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,SUIUSDT,AVAXUSDT,LTCUSDT,TRXUSDT,LTCUSDT,LINKUSDT,UNIUSDT,XLMUSDT").split(',')
     
     TIMEFRAME: str = os.getenv("TIMEFRAME", "30m")  # Candlestick interval
 
