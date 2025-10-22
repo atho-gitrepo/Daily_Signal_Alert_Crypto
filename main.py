@@ -2,8 +2,9 @@
 import time
 import logging
 import pandas as pd
-from typing import Dict, Optional, Tuple, Any
-from settings import Config # Config is now highly robust!
+from typing import Dict, Optional, Tuple, Any, List # Added List import
+from settings import Config
+# Note: Assuming utils.telegram_bot and strategy.consolidated_trend are in your environment
 from utils.telegram_bot import send_telegram_message_sync as send_telegram_message
 from binance.um_futures import UMFutures
 from binance.exceptions import BinanceAPIException, BinanceRequestException
@@ -12,16 +13,14 @@ from binance.exceptions import BinanceAPIException, BinanceRequestException
 from strategy.consolidated_trend import ConsolidatedTrendStrategy
 
 # Configure logging
-# IMPORTANT: Ensure logging is configured BEFORE the rest of the code runs.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# --- BinanceDataClient Class (Unchanged for brevity, but still good!) ---
-# ... (Keep the existing BinanceDataClient class here)
 
+# --- BinanceDataClient Class ---
 class BinanceDataClient:
     """Client for fetching real-time and historical data from Binance USD-M Futures."""
 
@@ -52,12 +51,12 @@ class BinanceDataClient:
 
     def _get_symbol_precisions(self):
         """Fetch price precision for all configured symbols from exchange info."""
-        # Symbol cleaning check (from our previous brainstorm!)
+        # Symbol cleaning check (from previous steps)
         valid_symbols = [s for s in Config.SYMBOLS if s.endswith(Config.QUOTE_ASSET) and s != Config.QUOTE_ASSET]
         if not valid_symbols:
             logger.error(f"❌ No valid symbols found! Check your SYMBOLS and QUOTE_ASSET config.")
             return
-            
+
         try:
             info = self.futures_client.exchange_info()
             
@@ -120,7 +119,6 @@ class BinanceDataClient:
         except Exception as e:
             logger.error(f"❌ Failed to fetch current price for {symbol}: {e}")
             return None
-# --- End of BinanceDataClient Class ---
 
 
 def escape_markdown(text: str) -> str:
@@ -134,8 +132,6 @@ def escape_markdown(text: str) -> str:
 
 def safe_send_telegram_message(message: str):
     """Safely send Telegram message with error handling."""
-    # Note: Telegram errors often occur in async code when the main thread crashes.
-    # By protecting the main loop, we prevent the event loop from closing prematurely.
     try:
         escaped_message = escape_markdown(message)
         send_telegram_message(escaped_message)
@@ -148,7 +144,6 @@ def format_signal_message(symbol: str, signal_type: str, signal_data: dict, curr
     if signal_type == "NO_TRADE":
         return f"⚪ No Trade Signal on *{symbol}* | Price: {current_price}"
     
-    # Use .4f for better precision for altcoins, assuming the price is rounded by the client
     entry = signal_data.get('entry_price', current_price)
     sl = signal_data.get('stop_loss', 0)
     tp = signal_data.get('take_profit', 0)
@@ -164,7 +159,7 @@ def format_signal_message(symbol: str, signal_type: str, signal_data: dict, curr
     
     return (
         f"{emoji} *{action} SIGNAL* for *{symbol}* {emoji}\n"
-        f"💰 Entry: ${entry:.4f}\n"  
+        f"💰 Entry: ${entry:.4f}\n" 
         f"🛑 Stop Loss: ${sl:.4f}\n"
         f"🎯 Take Profit: ${tp:.4f}\n"
         f"📊 Current: ${current_price:.4f}\n"
@@ -179,8 +174,7 @@ def main():
 
     try:
         # Determine the minimum required data points for the strategy
-        # Max of BB_PERIOD (34) and TDI_RSI_PERIOD (20)
-        MIN_KLINES_REQUIRED = max(Config.BB_PERIOD, Config.TDI_RSI_PERIOD) + 2 # Adding a buffer
+        MIN_KLINES_REQUIRED = max(Config.BB_PERIOD, Config.TDI_RSI_PERIOD) + 2
         
         # Initialize clients
         client = BinanceDataClient()
@@ -193,11 +187,9 @@ def main():
             symbol: {"last_signal": None, "cooldown": 0} for symbol in client.price_precisions.keys()
         }
         
-        # Get only the valid, fetched symbols
         symbols_to_monitor = list(client.price_precisions.keys())
 
         while True:
-            # 💡 IDEA 3: Protect the main loop by putting the symbol processing in a try/except
             for symbol in symbols_to_monitor:
                 try:
                     # 1. Get current price and historical data for the specific symbol
@@ -213,22 +205,21 @@ def main():
                         logger.warning(f"⚠️ Historical data for {symbol} is empty. Skipping cycle.")
                         continue
 
-                    # 💡 IDEA 1: Enforce Minimum Klines Check
+                    # Enforce Minimum Klines Check
                     if len(historical_data) < MIN_KLINES_REQUIRED:
                         logger.warning(f"⚠️ Insufficient klines ({len(historical_data)}/{MIN_KLINES_REQUIRED}) for {symbol}. Skipping calculation.")
-                        continue # Skip to the next symbol
+                        continue
 
                     # 2. Analyze data
-                    # This is where the 'bb_mid' crash happens in the strategy file!
                     analyzed_data = strategy.analyze_data(historical_data)
                     
-                    if not analyzed_data.empty and 'bb_mid' in analyzed_data.columns:
+                    # 🎯 FIX: Changed 'bb_mid' to 'bb_middle' for alignment with indicators.py
+                    if not analyzed_data.empty and 'bb_middle' in analyzed_data.columns: 
                         # 3. Generate trading signal
                         signal_type, signal_data = strategy.generate_signal(analyzed_data)
                         
                         # 4. Check for new signal and cooldown status for THIS symbol
                         is_new_signal = signal_type != "NO_TRADE"
-                        # Signal change OR cooldown has expired (cooldown <= 0)
                         is_not_spamming = (signal_type != state["last_signal"] or state["cooldown"] <= 0) 
                         
                         if is_new_signal and is_not_spamming:
@@ -248,19 +239,17 @@ def main():
                         if signal_type == "NO_TRADE":
                             logger.info(f"⚪ No trade signal for {symbol} | Price: {current_price:.4f}")
                     else:
-                        # 💡 IDEA 2 (Partial): Check for column availability after analysis
-                        if 'bb_mid' not in analyzed_data.columns:
-                             logger.critical(f"❌ CRASH PREVENTED: 'bb_mid' column missing for {symbol}! Strategy implementation error.")
+                        # 🎯 FIX: Changed 'bb_mid' to 'bb_middle' in the error log
+                        if 'bb_middle' not in analyzed_data.columns:
+                             logger.critical(f"❌ CRASH PREVENTED: 'bb_middle' column missing for {symbol}! Strategy implementation error. Check consolidated_trend.py.")
                         else:
                             logger.warning(f"⚠️ Analyzed data for {symbol} is empty after processing")
 
                 except Exception as e:
-                    # 💡 IDEA 3: Localized symbol error handler
+                    # Localized symbol error handler
                     error_message = f"🔥 CRITICAL ERROR processing {symbol}: {type(e).__name__}: {e}"
                     logger.critical(error_message)
-                    # We can choose to send a telegram alert for this specific symbol crash
                     safe_send_telegram_message(escape_markdown(error_message))
-                    # Continue to the next symbol! (SOLUSDT, BNBUSDT, etc.)
                     continue
             
             # Sleep after checking ALL symbols
@@ -268,7 +257,7 @@ def main():
             time.sleep(Config.POLLING_INTERVAL_SECONDS)
 
     except Exception as e:
-        # This only catches errors *outside* the main while loop (initialization errors)
+        # Global initialization error handler
         raw_error = f"🔥 Global Critical Error: {type(e).__name__}: {e}"
         logger.critical(raw_error)
         safe_send_telegram_message(escape_markdown(raw_error))
