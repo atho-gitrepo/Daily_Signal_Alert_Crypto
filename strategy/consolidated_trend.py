@@ -1,16 +1,17 @@
-# strategy/consolidated_trend.py (ENHANCED)
+# strategy/consolidated_trend.py
 import pandas as pd
 import numpy as np
 import logging
-from utils.indicators import Indicators 
+# Assuming 'Indicators' and 'Config' are properly defined in your project
+from utils.indicators import Indicators
 from settings import Config 
 
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
 RRR_RATIO = 1.5
-# NEW: Minimum BB Width as a percentage of the price (e.g., 0.003 means 0.3% min width)
-MIN_BB_WIDTH_PERCENT = 0.003
+# Minimum BB Width as a percentage of the price (e.g., 0.003 means 0.3% min width)
+MIN_BB_WIDTH_PERCENT = 0.003 
 
 # --- Strategy Class ---
 class ConsolidatedTrendStrategy:
@@ -19,39 +20,34 @@ class ConsolidatedTrendStrategy:
         # Ensure minimum data required for all indicators is known
         self.MIN_KLINES_REQUIRED = max(Config.TDI_RSI_PERIOD, Config.BB_PERIOD, Config.TDI_SLOW_MA_PERIOD) + 2
 
-
     def analyze_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Applies all indicators and prepares data for signal generation.
         Calculates BB Width for the new filter.
         
-        NOTE: df.copy() removed, assuming Indicators methods return a new DataFrame 
-              or handle copies internally (more efficient).
+        NOTE: Removed df.copy() calls for efficiency, assuming Indicators handles copies.
         """
         if df.empty:
             return df
 
         df.columns = [col.lower() for col in df.columns]
 
-        # 1. Calculate all necessary indicators
+        # Calculate all necessary indicators
         df = Indicators.calculate_super_tdi(df)
         df = Indicators.calculate_super_bollinger_bands(df)
 
-        # 2. FIXED: Calculate BB Width Percentage
-        # The column is named 'bb_middle' in indicators.py, not 'bb_mid'
-        # This was the cause of the original crash!
+        # 🎯 DEFINITIVE FIX: Calculate BB Width Percentage
+        # Uses 'bb_middle' from indicators.py
         if 'bb_middle' in df.columns and 'bb_lower' in df.columns and 'bb_upper' in df.columns:
+            # THIS LINE IS THE FIX: bb_middle instead of bb_mid
             df['bb_width_percent'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
         else:
             logger.critical("FATAL: Bollinger Band columns missing after calculation!")
-            return pd.DataFrame() # Crash prevention by returning empty
-
-        # Drop any rows with NaN values resulting from indicator lookback periods
+            return pd.DataFrame() 
+        
         df.dropna(inplace=True)
 
         return df
-
-    # ... (Rest of the class methods remain the same for functionality) ...
 
     def _calculate_structural_sl_tp(self, df, last_candle, signal_type, risk_factor=1.0):
         """
@@ -59,15 +55,15 @@ class ConsolidatedTrendStrategy:
         and a fixed RRR_RATIO. Lookback period reduced to 7 for 15m sharpness.
         """
         entry_price = last_candle['close']
-        lookback_period = 7 # Sharper lookback for 15m
+        lookback_period = 7 
         start_index = max(0, len(df) - lookback_period)
-        lookback_df = df.iloc[start_index:-1] # Exclude current candle for SL/TP reference
+        lookback_df = df.iloc[start_index:-1] 
 
         if signal_type == "BUY":
             # Using the minimum of the lookback lows as structural SL
             stop_loss = lookback_df['low'].min() * 0.998
             
-            # Fallback SL (if structural SL is too close or above entry)
+            # Fallback SL 
             if entry_price - stop_loss < entry_price * 0.002: # Minimum 0.2% risk
                 stop_loss = entry_price * 0.998
                 
@@ -78,7 +74,7 @@ class ConsolidatedTrendStrategy:
             # Using the maximum of the lookback highs as structural SL
             stop_loss = lookback_df['high'].max() * 1.002
             
-            # Fallback SL (if structural SL is too close or below entry)
+            # Fallback SL
             if stop_loss - entry_price < entry_price * 0.002: # Minimum 0.2% risk
                 stop_loss = entry_price * 1.002
                 
@@ -95,16 +91,13 @@ class ConsolidatedTrendStrategy:
         Generates buy/sell signals based on the strategy rules, incorporating 
         the Volatility Filter.
         """
-        # Using the self.MIN_KLINES_REQUIRED attribute set in __init__
         if df.empty or len(df) < self.MIN_KLINES_REQUIRED:
-            # We already check for this in main.py, but this is a fail-safe
             logger.warning(f"DataFrame too small for signal generation (Need >{self.MIN_KLINES_REQUIRED} rows).")
             return "NO_TRADE", {}
 
         last_candle = df.iloc[-1]
         prev_candle = df.iloc[-2]
 
-        # Use standardized column names from analyze_data
         rsi = last_candle['rsi']
         fast_ma = last_candle['tdi_fast_ma']
         slow_ma = last_candle['tdi_slow_ma']
@@ -113,27 +106,25 @@ class ConsolidatedTrendStrategy:
         bb_upper = last_candle['bb_upper']
         low = last_candle['low']
         high = last_candle['high']
-        bb_width_percent = last_candle['bb_width_percent'] # NEW
+        bb_width_percent = last_candle['bb_width_percent'] 
 
         risk_factor = 1.0
 
-        # --- NEW: Volatility Filter Check ---
+        # --- Volatility Filter Check ---
         if bb_width_percent < MIN_BB_WIDTH_PERCENT:
             logger.info(f"VOLATILITY FILTER: BB Width ({bb_width_percent:.4f}) too small. NO TRADE.")
             return "NO_TRADE", {"reason": "Low Volatility (Consolidation)."}
 
-        # --- Crossover Check (Simplified & Faster) ---
+        # --- Crossover Check ---
         bullish_crossover = (fast_ma > slow_ma) and (prev_candle['tdi_fast_ma'] <= prev_candle['tdi_slow_ma'])
         bearish_crossover = (fast_ma < slow_ma) and (prev_candle['tdi_fast_ma'] >= prev_candle['tdi_slow_ma'])
 
-        # --- BB Rejection Check (Refined) ---
-        # Rejection: candle closed back inside BB after touching/breaking the edge
+        # --- BB Rejection Check ---
         bb_rejection_buy = (prev_candle['low'] <= prev_candle['bb_lower']) and (close > prev_candle['close']) and (close > bb_lower)
         bb_rejection_sell = (prev_candle['high'] >= prev_candle['bb_upper']) and (close < prev_candle['close']) and (close < bb_upper)
 
         # --- BUY Signal ---
         if bullish_crossover and rsi < 55 and bb_rejection_buy:
-            # Risk factor logic remains, but now only triggers with volatility confirmation
             if rsi <= Config.TDI_HARD_BUY_LEVEL:
                 risk_factor = 1.5
                 logger.info(f"HARD BUY: Volatility confirmed, TDI Crossover, BB Rejection, and low RSI.")
