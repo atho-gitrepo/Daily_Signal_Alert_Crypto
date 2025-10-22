@@ -1,42 +1,57 @@
+# strategy/consolidated_trend.py (ENHANCED)
 import pandas as pd
 import numpy as np
 import logging
-# Assuming 'Indicators' and 'Config' are properly defined in your project
-from utils.indicators import Indicators
+from utils.indicators import Indicators 
 from settings import Config 
 
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
 RRR_RATIO = 1.5
-# NEW: Minimum BB Width as a percentage of the price (e.g., 0.005 means 0.5% min width)
-MIN_BB_WIDTH_PERCENT = 0.003  # Adjusted for 15m crypto volatility (e.g., 0.3%)
+# NEW: Minimum BB Width as a percentage of the price (e.g., 0.003 means 0.3% min width)
+MIN_BB_WIDTH_PERCENT = 0.003
 
 # --- Strategy Class ---
 class ConsolidatedTrendStrategy:
     def __init__(self):
         logger.info("Consolidated/Trend Trading Strategy (Volatility Filter) initialized.")
+        # Ensure minimum data required for all indicators is known
+        self.MIN_KLINES_REQUIRED = max(Config.TDI_RSI_PERIOD, Config.BB_PERIOD, Config.TDI_SLOW_MA_PERIOD) + 2
 
-    def analyze_data(self, df):
+
+    def analyze_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Applies all indicators and prepares data for signal generation.
         Calculates BB Width for the new filter.
+        
+        NOTE: df.copy() removed, assuming Indicators methods return a new DataFrame 
+              or handle copies internally (more efficient).
         """
         if df.empty:
             return df
 
         df.columns = [col.lower() for col in df.columns]
 
-        # Calculate all necessary indicators
-        df = Indicators.calculate_super_tdi(df.copy())
-        df = Indicators.calculate_super_bollinger_bands(df.copy())
+        # 1. Calculate all necessary indicators
+        df = Indicators.calculate_super_tdi(df)
+        df = Indicators.calculate_super_bollinger_bands(df)
 
-        # NEW: Calculate BB Width Percentage
-        df['bb_width_percent'] = (df['bb_upper'] - df['bb_lower']) / df['bb_mid']
-        
+        # 2. FIXED: Calculate BB Width Percentage
+        # The column is named 'bb_middle' in indicators.py, not 'bb_mid'
+        # This was the cause of the original crash!
+        if 'bb_middle' in df.columns and 'bb_lower' in df.columns and 'bb_upper' in df.columns:
+            df['bb_width_percent'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
+        else:
+            logger.critical("FATAL: Bollinger Band columns missing after calculation!")
+            return pd.DataFrame() # Crash prevention by returning empty
+
+        # Drop any rows with NaN values resulting from indicator lookback periods
         df.dropna(inplace=True)
 
         return df
+
+    # ... (Rest of the class methods remain the same for functionality) ...
 
     def _calculate_structural_sl_tp(self, df, last_candle, signal_type, risk_factor=1.0):
         """
@@ -80,14 +95,16 @@ class ConsolidatedTrendStrategy:
         Generates buy/sell signals based on the strategy rules, incorporating 
         the Volatility Filter.
         """
-        min_data = max(Config.TDI_RSI_PERIOD, Config.BB_PERIOD, Config.TDI_SLOW_MA_PERIOD) + 5
-        if df.empty or len(df) < min_data:
-            logger.warning(f"DataFrame too small for signal generation (Need >{min_data} rows).")
+        # Using the self.MIN_KLINES_REQUIRED attribute set in __init__
+        if df.empty or len(df) < self.MIN_KLINES_REQUIRED:
+            # We already check for this in main.py, but this is a fail-safe
+            logger.warning(f"DataFrame too small for signal generation (Need >{self.MIN_KLINES_REQUIRED} rows).")
             return "NO_TRADE", {}
 
         last_candle = df.iloc[-1]
         prev_candle = df.iloc[-2]
 
+        # Use standardized column names from analyze_data
         rsi = last_candle['rsi']
         fast_ma = last_candle['tdi_fast_ma']
         slow_ma = last_candle['tdi_slow_ma']
