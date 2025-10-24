@@ -9,61 +9,44 @@ from settings import Config
 
 logger = logging.getLogger(__name__)
 
-# --- Configuration ---
-RRR_RATIO = 1.5
-# Minimum BB Width as a percentage of the price (e.g., 0.003 means 0.3% min width)
+# --- Strategy Constants (Hard-coded for strict rule enforcement) ---
+RRR_RATIO = 1.0 # Target RRR of 1:1
 MIN_BB_WIDTH_PERCENT = 0.003 
-# Maximum BB Width to avoid extreme volatility
 MAX_BB_WIDTH_PERCENT = 0.03
+TDI_NO_TRADE_RANGE = 3 # Margin around 50 for No Trade Zone (i.e., 47 to 53)
+MIN_RISK_PERCENT = 0.0015 # 0.15% minimum SL distance
+MAX_RISK_PERCENT = 0.02 # 2% maximum SL distance
 
 # --- Strategy Class ---
 class ConsolidatedTrendStrategy:
     def __init__(self):
-        logger.info("Consolidated/Trend Trading Strategy (Volatility Filter) initialized.")
+        logger.info("Consolidated/Trend Trading Strategy (Strict 15min) initialized.")
         # Ensure minimum data required for all indicators is known
         self.MIN_KLINES_REQUIRED = max(Config.TDI_RSI_PERIOD, Config.BB_PERIOD, Config.TDI_SLOW_MA_PERIOD) + 10
         
-        # Strategy state tracking
         self.last_signal = "NO_TRADE"
         self.consecutive_signals = 0
 
     def analyze_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Applies all indicators and prepares data for signal generation.
-        Calculates BB Width for the volatility filter.
-        
-        Enhanced with additional trend confirmation and market state detection.
-        """
+        """Applies all indicators and prepares data for signal generation."""
         if df.empty:
-            logger.warning("Empty DataFrame provided to analyze_data")
             return df
-
-        # Make a copy to avoid modifying original data
+        
         df = df.copy()
         df.columns = [col.lower() for col in df.columns]
 
         try:
-            # Calculate all necessary indicators
-            df = Indicators.calculate_super_tdi(df)
-            df = Indicators.calculate_super_bollinger_bands(df)
-
-            # 🎯 Calculate BB Width Percentage for volatility filter
-            if all(col in df.columns for col in ['bb_upper', 'bb_lower', 'bb_middle']):
-                df['bb_width_percent'] = (df['bb_upper'] - df['bb_lower']) / df['bb_middle']
-                # Add BB position relative to price
-                df['bb_position'] = (df['close'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-            else:
-                logger.error("Bollinger Band columns missing after calculation!")
-                return pd.DataFrame()
+            df = Indicators.calculate_all_indicators(df)
             
-            # Additional trend strength indicators
-            df = self._calculate_trend_strength(df)
-            df = self._calculate_market_state(df)
+            # Additional market state/strength calculations for filters
+            if all(col in df.columns for col in ['bb_width_percent', 'tdi_strength']):
+                df['market_state'] = np.select(
+                    [df['bb_width_percent'] < MIN_BB_WIDTH_PERCENT, df['bb_width_percent'] > MAX_BB_WIDTH_PERCENT],
+                    ['CONSOLIDATION', 'HIGH_VOL'],
+                    default='NORMAL'
+                )
             
             df.dropna(inplace=True)
-            
-            if df.empty:
-                logger.warning("All data removed after dropna()")
 
         except Exception as e:
             logger.error(f"Error in analyze_data: {str(e)}")
@@ -71,271 +54,163 @@ class ConsolidatedTrendStrategy:
 
         return df
 
-    def _calculate_trend_strength(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate additional trend strength metrics"""
-        # TDI trend strength
-        df['tdi_trend'] = df['tdi_fast_ma'] - df['tdi_slow_ma']
-        df['tdi_strength'] = abs(df['tdi_trend']) / df['tdi_slow_ma']
-        
-        # Price momentum relative to BB
-        if 'bb_middle' in df.columns:
-            df['price_vs_bb'] = (df['close'] - df['bb_middle']) / df['bb_middle']
-        
-        # Volume confirmation (if available)
-        if 'volume' in df.columns:
-            df['volume_ma'] = df['volume'].rolling(window=20).mean()
-            df['volume_ratio'] = df['volume'] / df['volume_ma']
-        
-        return df
-
-    def _calculate_market_state(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Detect market state (trending, ranging, volatile)"""
-        # Price volatility
-        df['price_range'] = (df['high'] - df['low']) / df['low']
-        df['range_ma'] = df['price_range'].rolling(window=20).mean()
-        df['volatility_ratio'] = df['price_range'] / df['range_ma']
-        
-        # Market state classification
-        conditions = [
-            (df['bb_width_percent'] < MIN_BB_WIDTH_PERCENT),  # Consolidation
-            (df['bb_width_percent'] > MAX_BB_WIDTH_PERCENT),  # High Volatility
-            (df['tdi_strength'] > df['tdi_strength'].rolling(20).mean()),  # Strong Trend
-        ]
-        choices = ['CONSOLIDATION', 'HIGH_VOL', 'TRENDING']
-        df['market_state'] = np.select(conditions, choices, default='NORMAL')
-        
-        return df
-
     def _calculate_structural_sl_tp(self, df, last_candle, signal_type, risk_factor=1.0):
         """
-        Enhanced SL/TP calculation with multiple confirmation methods.
+        Calculates SL/TP based on recent swing structure and 1:1 RRR.
         """
         entry_price = last_candle['close']
         
-        # Dynamic lookback based on market volatility
-        volatility_lookback = min(20, max(5, int(last_candle.get('volatility_ratio', 1) * 10)))
-        lookback_period = volatility_lookback
+        # Use 10 bars for swing low/high approximation
+        lookback_period = 10 
+        lookback_df = df.iloc[max(0, len(df) - lookback_period):-1]
         
-        start_index = max(0, len(df) - lookback_period)
-        lookback_df = df.iloc[start_index:-1]
+        atr_buffer = last_candle.get('atr', entry_price * 0.001) * 0.5 # Small buffer
 
         if signal_type == "BUY":
-            # Method 1: Recent swing low
-            swing_low_sl = lookback_df['low'].min() * 0.998
+            # SL: Just beyond the recent swing low
+            swing_low = lookback_df['low'].min()
+            stop_loss = swing_low - atr_buffer 
             
-            # Method 2: BB-based SL
-            bb_sl = last_candle.get('bb_lower', entry_price * 0.99) * 0.995
-            
-            # Use the more conservative (higher) SL
-            stop_loss = max(swing_low_sl, bb_sl)
-            
-            # Minimum risk check (0.15% minimum)
-            min_risk_distance = entry_price * 0.0015
-            if entry_price - stop_loss < min_risk_distance:
-                stop_loss = entry_price - min_risk_distance
-                
-            # Maximum risk check (2% maximum)  
-            max_risk_distance = entry_price * 0.02
-            if entry_price - stop_loss > max_risk_distance:
-                stop_loss = entry_price - max_risk_distance
-                
+            # Apply min/max risk constraints
             sl_distance = entry_price - stop_loss
-            take_profit = entry_price + (sl_distance * RRR_RATIO * risk_factor)
-
+            if sl_distance < entry_price * MIN_RISK_PERCENT:
+                stop_loss = entry_price - entry_price * MIN_RISK_PERCENT
+            if sl_distance > entry_price * MAX_RISK_PERCENT:
+                stop_loss = entry_price - entry_price * MAX_RISK_PERCENT
+                
+            sl_distance_final = entry_price - stop_loss
+            take_profit = entry_price + (sl_distance_final * RRR_RATIO)
+            
         elif signal_type == "SELL":
-            # Method 1: Recent swing high
-            swing_high_sl = lookback_df['high'].max() * 1.002
+            # SL: Just beyond the recent swing high
+            swing_high = lookback_df['high'].max()
+            stop_loss = swing_high + atr_buffer
             
-            # Method 2: BB-based SL
-            bb_sl = last_candle.get('bb_upper', entry_price * 1.01) * 1.005
-            
-            # Use the more conservative (lower) SL
-            stop_loss = min(swing_high_sl, bb_sl)
-            
-            # Minimum risk check (0.15% minimum)
-            min_risk_distance = entry_price * 0.0015
-            if stop_loss - entry_price < min_risk_distance:
-                stop_loss = entry_price + min_risk_distance
-                
-            # Maximum risk check (2% maximum)
-            max_risk_distance = entry_price * 0.02
-            if stop_loss - entry_price > max_risk_distance:
-                stop_loss = entry_price + max_risk_distance
-                
+            # Apply min/max risk constraints
             sl_distance = stop_loss - entry_price
-            take_profit = entry_price - (sl_distance * RRR_RATIO * risk_factor)
+            if sl_distance < entry_price * MIN_RISK_PERCENT:
+                stop_loss = entry_price + entry_price * MIN_RISK_PERCENT
+            if sl_distance > entry_price * MAX_RISK_PERCENT:
+                stop_loss = entry_price + entry_price * MAX_RISK_PERCENT
+                
+            sl_distance_final = stop_loss - entry_price
+            take_profit = entry_price - (sl_distance_final * RRR_RATIO)
 
         else:
             return entry_price, 0, 0
 
-        logger.debug(f"SL/TP Calculation: Entry={entry_price:.4f}, SL={stop_loss:.4f}, TP={take_profit:.4f}, Risk={abs(entry_price-stop_loss)/entry_price*100:.2f}%")
         return entry_price, stop_loss, take_profit
 
     def _check_volatility_filter(self, bb_width_percent: float) -> bool:
-        """
-        Check if volatility conditions are suitable for trading.
-        """
+        """Check if volatility is suitable."""
         if bb_width_percent < MIN_BB_WIDTH_PERCENT:
-            logger.debug(f"Volatility too low: {bb_width_percent:.4f} < {MIN_BB_WIDTH_PERCENT}")
             return False
             
         if bb_width_percent > MAX_BB_WIDTH_PERCENT:
-            logger.debug(f"Volatility too high: {bb_width_percent:.4f} > {MAX_BB_WIDTH_PERCENT}")
             return False
             
         return True
 
-    def _check_tdi_zone(self, rsi: float, signal_type: str) -> Tuple[bool, float]:
+    def _check_tdi_zone(self, tdi_slow_ma: float, signal_type: str) -> Tuple[bool, float]:
         """
-        Check TDI zone and determine risk factor.
+        Check TDI zone (1) and assign risk factor (6).
         """
         if signal_type == "BUY":
-            if rsi <= Config.TDI_HARD_BUY_LEVEL:
-                return True, 1.5  # Hard buy
-            elif rsi <= Config.TDI_SOFT_BUY_LEVEL:
-                return True, 1.2  # Soft buy
-            elif rsi < 50:  # Buyer zone but not at key levels
-                return True, 1.0
+            # Rule 1: Price enters the Buyer Zone (TDI below 50)
+            if tdi_slow_ma < Config.TDI_CENTER_LINE:
+                if tdi_slow_ma <= Config.TDI_HARD_BUY_LEVEL: # Near 25
+                    return True, 2.0  # Hard Buy (2x Risk)
+                elif tdi_slow_ma <= Config.TDI_SOFT_BUY_LEVEL: # Near 35
+                    return True, 1.0  # Soft Buy (1x Risk)
+                else:
+                    return True, 1.0 # Default in buyer zone
                 
         elif signal_type == "SELL":
-            if rsi >= Config.TDI_HARD_SELL_LEVEL:
-                return True, 1.5  # Hard sell
-            elif rsi >= Config.TDI_SOFT_SELL_LEVEL:
-                return True, 1.2  # Soft sell
-            elif rsi > 50:  # Seller zone but not at key levels
-                return True, 1.0
-                
+            # Rule 1: Price enters the Seller Zone (TDI above 50)
+            if tdi_slow_ma > Config.TDI_CENTER_LINE:
+                if tdi_slow_ma >= Config.TDI_HARD_SELL_LEVEL: # Near 75
+                    return True, 2.0  # Hard Sell (2x Risk)
+                elif tdi_slow_ma >= Config.TDI_SOFT_SELL_LEVEL: # Near 65
+                    return True, 1.0  # Soft Sell (1x Risk)
+                else:
+                    return True, 1.0 # Default in seller zone
+
         return False, 1.0
-
-    def _check_additional_filters(self, df: pd.DataFrame, current_index: int) -> bool:
-        """
-        Apply additional filters to improve signal quality.
-        """
-        if len(df) < 5:
-            return True
-            
-        # Avoid trading during extreme volatility
-        current_volatility = df.iloc[current_index].get('volatility_ratio', 1)
-        if current_volatility > 2.0:
-            logger.debug("Skipping trade: Extreme volatility")
-            return False
-            
-        # Check if market is in strong trend (good for our strategy)
-        market_state = df.iloc[current_index].get('market_state', 'NORMAL')
-        if market_state == 'CONSOLIDATION':
-            logger.debug("Skipping trade: Market in consolidation")
-            return False
-            
-        # Volume confirmation (if available)
-        if 'volume_ratio' in df.columns:
-            volume_ratio = df.iloc[current_index]['volume_ratio']
-            if volume_ratio < 0.8:  # Low volume
-                logger.debug("Skipping trade: Low volume")
-                return False
-                
-        return True
-
+        
     def generate_signal(self, df):
         """
-        Enhanced signal generation with multiple confirmation layers.
+        Implements the Consolidated/Trend Trading Strategy strictly.
         """
         if df.empty or len(df) < self.MIN_KLINES_REQUIRED:
-            logger.warning(f"DataFrame too small for signal generation (Need >{self.MIN_KLINES_REQUIRED} rows).")
             return "NO_TRADE", {}
 
         last_candle = df.iloc[-1]
         prev_candle = df.iloc[-2]
 
         # Extract key indicators
-        rsi = last_candle['rsi']
-        fast_ma = last_candle['tdi_fast_ma']
-        slow_ma = last_candle['tdi_slow_ma']
-        close = last_candle['close']
-        bb_lower = last_candle['bb_lower']
-        bb_upper = last_candle['bb_upper']
+        tdi_slow_ma = last_candle['tdi_slow_ma']     # Red Line (Bears MA)
+        fast_ma = last_candle['tdi_fast_ma']         # Green Line (Bulls MA)
         bb_width_percent = last_candle['bb_width_percent']
-        prev_low = prev_candle['low']
-        prev_high = prev_candle['high']
-        prev_close = prev_candle['close']
 
-        # --- Volatility Filter Check ---
+        # --- 3. No Trade Zone Check ---
+        # When the TDI (SlowMA) is stalling around the 50 level (centerline).
+        if abs(tdi_slow_ma - Config.TDI_CENTER_LINE) <= TDI_NO_TRADE_RANGE:
+            self._update_signal_state("NO_TRADE")
+            return "NO_TRADE", {"reason": "TDI SlowMA stalling near 50 (Indecision Zone)."}
+
+        # --- Volatility Filter Check (Advanced Tips 7) ---
         if not self._check_volatility_filter(bb_width_percent):
-            logger.info(f"VOLATILITY FILTER: BB Width ({bb_width_percent:.4f}) outside optimal range. NO TRADE.")
-            return "NO_TRADE", {"reason": f"Volatility out of range: {bb_width_percent:.4f}"}
+            return "NO_TRADE", {"reason": "Volatility Filter: BB Width outside optimal range."}
 
-        # --- Crossover Check ---
-        bullish_crossover = (fast_ma > slow_ma) and (prev_candle['tdi_fast_ma'] <= prev_candle['tdi_slow_ma'])
-        bearish_crossover = (fast_ma < slow_ma) and (prev_candle['tdi_fast_ma'] >= prev_candle['tdi_slow_ma'])
-
-        # --- BB Rejection Check (Enhanced) ---
-        bb_rejection_buy = (
-            (prev_low <= prev_candle['bb_lower']) and 
-            (close > prev_close) and 
-            (close > bb_lower) and
-            (last_candle['close'] > last_candle['open'])  # Bullish candle confirmation
-        )
+        # --- Crossover Check (Rule 2) ---
+        bullish_crossover = (fast_ma > tdi_slow_ma) and (prev_candle['tdi_fast_ma'] <= prev_candle['tdi_slow_ma'])
+        bearish_crossover = (fast_ma < tdi_slow_ma) and (prev_candle['tdi_fast_ma'] >= prev_candle['tdi_slow_ma'])
         
-        bb_rejection_sell = (
-            (prev_high >= prev_candle['bb_upper']) and 
-            (close < prev_close) and 
-            (close < bb_upper) and
-            (last_candle['close'] < last_candle['open'])  # Bearish candle confirmation
-        )
-
-        # --- Additional Filters ---
-        if not self._check_additional_filters(df, -1):
-            return "NO_TRADE", {"reason": "Additional filters failed"}
+        # --- BB Rejection Check (Rule 3 & 4) ---
+        # Checks if previous bar touched/moved outside BB and current bar closed back inside/above/below.
+        bb_rejection_buy = last_candle['bb_rejection_buy'] 
+        bb_rejection_sell = last_candle['bb_rejection_sell'] 
 
         signal_details = {}
 
-        # --- BUY Signal ---
+        # --- FINAL BUY Signal Check ---
         if bullish_crossover and bb_rejection_buy:
-            zone_ok, risk_factor = self._check_tdi_zone(rsi, "BUY")
+            zone_ok, risk_factor = self._check_tdi_zone(tdi_slow_ma, "BUY")
             
             if zone_ok:
                 entry, sl, tp = self._calculate_structural_sl_tp(df, last_candle, "BUY", risk_factor)
+                signal_strength = "HARD" if risk_factor == 2.0 else "SOFT"
                 
                 signal_details = {
-                    "entry_price": entry,
-                    "stop_loss": sl,
-                    "take_profit": tp,
-                    "risk_factor": risk_factor,
-                    "tdi_value": rsi,
-                    "bb_width": bb_width_percent,
-                    "market_state": last_candle.get('market_state', 'UNKNOWN'),
-                    "signal_strength": "HARD" if risk_factor == 1.5 else "SOFT" if risk_factor == 1.2 else "NORMAL"
+                    "entry_price": entry, "stop_loss": sl, "take_profit": tp,
+                    "risk_factor": risk_factor, "tdi_slow_ma": tdi_slow_ma,
+                    "signal_strength": signal_strength,
+                    "note": f"Risk {risk_factor:.1f}x (Hard/Soft). RRR 1:1."
                 }
                 
-                logger.info(f"*** BUY SIGNAL *** RSI={rsi:.2f}, Risk={risk_factor:.1f}x, SL={sl:.4f}, TP={tp:.4f}")
                 self._update_signal_state("BUY")
                 return "BUY", signal_details
 
-        # --- SELL Signal ---
+        # --- FINAL SELL Signal Check ---
         if bearish_crossover and bb_rejection_sell:
-            zone_ok, risk_factor = self._check_tdi_zone(rsi, "SELL")
+            zone_ok, risk_factor = self._check_tdi_zone(tdi_slow_ma, "SELL")
             
             if zone_ok:
                 entry, sl, tp = self._calculate_structural_sl_tp(df, last_candle, "SELL", risk_factor)
+                signal_strength = "HARD" if risk_factor == 2.0 else "SOFT"
                 
                 signal_details = {
-                    "entry_price": entry,
-                    "stop_loss": sl,
-                    "take_profit": tp,
-                    "risk_factor": risk_factor,
-                    "tdi_value": rsi,
-                    "bb_width": bb_width_percent,
-                    "market_state": last_candle.get('market_state', 'UNKNOWN'),
-                    "signal_strength": "HARD" if risk_factor == 1.5 else "SOFT" if risk_factor == 1.2 else "NORMAL"
+                    "entry_price": entry, "stop_loss": sl, "take_profit": tp,
+                    "risk_factor": risk_factor, "tdi_slow_ma": tdi_slow_ma,
+                    "signal_strength": signal_strength,
+                    "note": f"Risk {risk_factor:.1f}x (Hard/Soft). RRR 1:1."
                 }
                 
-                logger.info(f"*** SELL SIGNAL *** RSI={rsi:.2f}, Risk={risk_factor:.1f}x, SL={sl:.4f}, TP={tp:.4f}")
                 self._update_signal_state("SELL")
                 return "SELL", signal_details
 
-        # --- NO TRADE ---
-        logger.debug(f"No trade: BullishX={bullish_crossover}, BearishX={bearish_crossover}, BBRejBuy={bb_rejection_buy}, BBRejSell={bb_rejection_sell}")
         self._update_signal_state("NO_TRADE")
-        return "NO_TRADE", {"reason": "No valid crossover + rejection combination"}
+        return "NO_TRADE", {"reason": "Conditions for TDI crossover, BB rejection, or TDI zone were not met."}
 
     def _update_signal_state(self, current_signal: str):
         """Track consecutive signals to avoid overtrading"""
