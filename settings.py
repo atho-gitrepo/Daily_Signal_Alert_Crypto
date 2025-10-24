@@ -21,7 +21,7 @@ def safe_int_env(key: str, default: int) -> int:
 class Config:
     """
     Configuration settings for Binance data client and strategy.
-    Enhanced for multi-symbol trading, risk management, and operational robustness.
+    Optimized for multi-symbol trading and strict 15-minute strategy.
     """
 
     # ------------------- Binance API Credentials -------------------
@@ -29,53 +29,57 @@ class Config:
     BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
     BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "False").lower() in ("true", "1", "t")
 
-    # Idea 3: Run Mode for safety and context
     RUN_MODE: str = os.getenv("RUN_MODE", "PRODUCTION").upper()
     
     # ------------------------ Market Data --------------------------
     
-    # Idea 1: Quote Asset and Symbol Max
-    QUOTE_ASSET: str = os.getenv("QUOTE_ASSET", "USDT")  # All symbols must end with this asset
-    MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 15)  # Safety limit for number of pairs to monitor
+    QUOTE_ASSET: str = os.getenv("QUOTE_ASSET", "USDT")
+    MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 30) # Increased capacity for more symbols
 
-    # Define a list of symbols for high-frequency checks
-    # The list is defined as a comma-separated string in the environment, and splits here.
+    # High-liquidity symbols based on Market Capitalization (25+ pairs)
+    # This list increases your daily signal potential on the 15m chart.
     SYMBOLS: List[str] = os.getenv(
         "SYMBOLS", 
-        "ETHUSDT,SOLUSDT,BNBUSDT,APRUSDT,,XRPUSDT,ADAUSDT,DOGEUSDT,SUIUSDT,AVAXUSDT,LTCUSDT,TRXUSDT,LINKUSDT,UNIUSDT,XLMUSDT"
-    ).upper().split(',')
+        (
+            "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,AVAXUSDT,"
+            "DOTUSDT,TRXUSDT,LINKUSDT,MATICUSDT,BCHUSDT,LTCUSDT,UNIUSDT,NEARUSDT,"
+            "ETCUSDT,XLMUSDT,APTUSDT,OPUSDT,ARBIBUSDT,SUIUSDT,INJUSDT,IMXUSDT,"
+            "FILUSDT,ATOMUSDT,VETUSDT,ICPUSDT"
+        )
+    ).upper().split(',') # 28 Pairs
     
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "30m")  # Candlestick interval
+    # CRITICAL: Set the timeframe to 15m for day trading focus
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")
 
     # ----------------------- Polling & API Control ----------------------
     
     POLLING_INTERVAL_SECONDS: int = safe_int_env("POLLING_INTERVAL_SECONDS", 60)
+    API_TIMEOUT_SECONDS: int = safe_int_env("API_TIMEOUT_SECONDS", 10)
     
-    # Idea 3: API Timeout for operational robustness
-    API_TIMEOUT_SECONDS: int = safe_int_env("API_TIMEOUT_SECONDS", 10) # Timeout for individual API requests
+    # --------------------- Strategy Parameters (Confirming Strict Rules) ---------------------
     
-    # --------------------- Strategy Parameters ---------------------
+    # TDI Parameters (Must match the Pine Script logic)
+    TDI_RSI_PERIOD: int = 10 
+    TDI_BB_LENGTH: int = 20 
+    TDI_FAST_MA_PERIOD: int = 1 # Green Line
+    TDI_SLOW_MA_PERIOD: int = 5 # Red Line
     
-    # TDI Parameters (as before)
-    TDI_RSI_PERIOD: int = 20
-    TDI_PRICE_MA_PERIOD: int = 2
-    TDI_FAST_MA_PERIOD: int = 7
-    TDI_SLOW_MA_PERIOD: int = 14
+    # Super Bollinger Band Parameters
     BB_PERIOD: int = 34
-    BB_DEV: float = 2.0
+    BB_DEV: float = 1.750
+    BB_TREND_PERIOD: int = 9 
 
-    # TDI Trade Zones (as before)
-    TDI_NO_TRADE_ZONE_START: float = 45.0
-    TDI_NO_TRADE_ZONE_END: float = 55.0
+    # TDI Trade Zones (Match the 25/35/50/65/75 levels)
+    TDI_CENTER_LINE: float = 50.0 
     TDI_SOFT_BUY_LEVEL: float = 35.0
     TDI_HARD_BUY_LEVEL: float = 25.0
     TDI_SOFT_SELL_LEVEL: float = 65.0
     TDI_HARD_SELL_LEVEL: float = 75.0
     
-    # Idea 2: Multi-Symbol Risk Management
-    # These settings help control exposure across multiple simultaneous trades
-    MAX_TOTAL_RISK_CAPITAL_PERCENT: float = safe_float_env("MAX_TOTAL_RISK_CAPITAL_PERCENT", 10.0) # Max 10% of portfolio open at once
-    RISK_PER_TRADE_PERCENT: float = safe_float_env("RISK_PER_TRADE_PERCENT", 1.0) # Risk 1% of total capital per trade
+    # --------------------- Risk Management -------------------------
+    
+    MAX_TOTAL_RISK_CAPITAL_PERCENT: float = safe_float_env("MAX_TOTAL_RISK_CAPITAL_PERCENT", 10.0) 
+    RISK_PER_TRADE_PERCENT: float = safe_float_env("RISK_PER_TRADE_PERCENT", 0.5)
     
     # ------------------------ Telegram Bot -------------------------
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
