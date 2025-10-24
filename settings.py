@@ -42,7 +42,7 @@ class Config:
     # The list is defined as a comma-separated string in the environment, and splits here.
     SYMBOLS: List[str] = os.getenv(
         "SYMBOLS", 
-        "ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,SUIUSDT,AVAXUSDT,LTCUSDT,TRXUSDT,LINKUSDT,UNIUSDT,XLMUSDT"
+        "ETHUSDT,SOLUSDT,BNBUSDT,APRUSDT,,XRPUSDT,ADAUSDT,DOGEUSDT,SUIUSDT,AVAXUSDT,LTCUSDT,TRXUSDT,LINKUSDT,UNIUSDT,XLMUSDT"
     ).upper().split(',')
     
     TIMEFRAME: str = os.getenv("TIMEFRAME", "30m")  # Candlestick interval
