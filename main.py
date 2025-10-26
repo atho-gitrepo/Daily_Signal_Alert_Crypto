@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 # Local imports
 from settings import Config
 from data_fetcher import DataFetcher
-from strategy.consolidated_trend import ConsolidatedTrend
+from strategy.consolidated_trend import ConsolidatedTrendStrategy
 from utils.telegram_bot import send_telegram_message_sync as send_telegram_message # Import the safe sync function
 from utils.signal_manager import (
     SignalManager, 
