@@ -58,11 +58,13 @@ class DataFetcher:
     Handles connection to the exchange and fetches/cleans market data.
     """
     
-    def __init__(self):
+     def __init__(self):
         """Initialize the exchange client using settings from Config."""
         self.client = MockBinanceClient(
-            api_key=Config.API_KEY, 
-            api_secret=Config.API_SECRET
+            # 💡 FIX: Change API_KEY to BINANCE_API_KEY
+            api_key=Config.BINANCE_API_KEY, 
+            # 💡 FIX: Change API_SECRET to BINANCE_API_SECRET
+            api_secret=Config.BINANCE_API_SECRET 
         )
         # You would replace MockBinanceClient with your actual Client here.
 
