@@ -31,7 +31,7 @@ class MockBinanceClient:
             '1h': 'H', '2h': '2H', '4h': '4H', '6h': '6H', '8h': '8H', '12h': '12H', 
             '1d': 'D', '3d': '3D', '1w': 'W', '1M': 'M'
         }
-        freq = freq_map.get(interval, '15T') # Default to 15T if unknown
+        freq = freq_map.get(interval, '15m') # Default to 15T if unknown
         
         end_time = pd.Timestamp.now(tz='UTC').floor(freq)
         
