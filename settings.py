@@ -1,6 +1,6 @@
 # settings.py
 import os
-import logging # ⬅️ ADDED: Need this for logging levels
+import logging
 from typing import List
 
 # Helper function for safe float conversion with a default
@@ -26,10 +26,11 @@ class Config:
     """
 
     # ------------------- Logging & Core Settings -------------------
-    # 💡 FIX: ADDED the required LOG_LEVEL attribute
+    # FIX: Added LOG_LEVEL for main.py logging setup
     LOG_LEVEL = os.getenv('LOG_LEVEL', logging.INFO)
 
     # ------------------- Binance API Credentials -------------------
+    # Note: main.py/data_fetcher.py use these full names.
     BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
     BINANCE_API_SECRET: str = os.getenv("BINANCE_API_SECRET", "")
     BINANCE_TESTNET: bool = os.getenv("BINANCE_TESTNET", "False").lower() in ("true", "1", "t")
@@ -39,10 +40,8 @@ class Config:
     # ------------------------ Market Data --------------------------
     
     QUOTE_ASSET: str = os.getenv("QUOTE_ASSET", "USDT")
-    MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 30) # Increased capacity for more symbols
+    MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 30)
 
-    # High-liquidity symbols based on Market Capitalization (25+ pairs)
-    # This list increases your daily signal potential on the 15m chart.
     SYMBOLS: List[str] = os.getenv(
         "SYMBOLS", 
         (
@@ -51,9 +50,11 @@ class Config:
             "ETCUSDT,XLMUSDT,APTUSDT,OPUSDT,ARBIBUSDT,SUIUSDT,INJUSDT,IMXUSDT,"
             "FILUSDT,ATOMUSDT,VETUSDT,ICPUSDT"
         )
-    ).upper().split(',') # 28 Pairs
+    ).upper().split(',')
     
-    # CRITICAL: Set the timeframe to 15m for day trading focus
+    # FIX: ADDED KLINES_LIMIT to resolve the latest NameError
+    KLINES_LIMIT: int = safe_int_env("KLINES_LIMIT", 300) 
+
     TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")
 
     # ----------------------- Polling & API Control ----------------------
@@ -61,27 +62,27 @@ class Config:
     POLLING_INTERVAL_SECONDS: int = safe_int_env("POLLING_INTERVAL_SECONDS", 60)
     API_TIMEOUT_SECONDS: int = safe_int_env("API_TIMEOUT_SECONDS", 10)
     
-    # --------------------- Strategy Parameters (Confirming Strict Rules) ---------------------
+    # --------------------- Strategy Parameters ---------------------
     
-    # TDI Parameters (Must match the Pine Script logic)
+    # TDI Parameters
     TDI_RSI_PERIOD: int = 10 
     TDI_BB_LENGTH: int = 20 
-    TDI_FAST_MA_PERIOD: int = 1 # Green Line
-    TDI_SLOW_MA_PERIOD: int = 5 # Red Line
+    TDI_FAST_MA_PERIOD: int = 1 
+    TDI_SLOW_MA_PERIOD: int = 5
     
     # Super Bollinger Band Parameters
     BB_PERIOD: int = 34
-    BB_STD_DEV: float = 1.750 # Changed from BB_DEV to match common convention in code
+    BB_STD_DEV: float = 1.750
     BB_TREND_PERIOD: int = 9 
 
-    # TDI Trade Zones (Match the 25/35/50/65/75 levels)
+    # TDI Trade Zones
     TDI_CENTER_LINE: float = 50.0 
     TDI_SOFT_BUY_LEVEL: float = 35.0
     TDI_HARD_BUY_LEVEL: float = 25.0
     TDI_SOFT_SELL_LEVEL: float = 65.0
     TDI_HARD_SELL_LEVEL: float = 75.0
     
-    # 💡 FIX: ADDED ATR Settings required by strategy/consolidated_trend.py
+    # ATR Settings
     ATR_PERIOD: int = safe_int_env("ATR_PERIOD", 14)
     ATR_MULTIPLIER: float = safe_float_env("ATR_MULTIPLIER", 1.5)
     
@@ -93,5 +94,3 @@ class Config:
     # ------------------------ Telegram Bot -------------------------
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
-
-# Note: The 'logging' import at the top is crucial for the LOG_LEVEL setting.
