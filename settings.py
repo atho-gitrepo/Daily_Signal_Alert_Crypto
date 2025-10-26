@@ -1,5 +1,6 @@
 # settings.py
 import os
+import logging # ⬅️ ADDED: Need this for logging levels
 from typing import List
 
 # Helper function for safe float conversion with a default
@@ -23,6 +24,10 @@ class Config:
     Configuration settings for Binance data client and strategy.
     Optimized for multi-symbol trading and strict 15-minute strategy.
     """
+
+    # ------------------- Logging & Core Settings -------------------
+    # 💡 FIX: ADDED the required LOG_LEVEL attribute
+    LOG_LEVEL = os.getenv('LOG_LEVEL', logging.INFO)
 
     # ------------------- Binance API Credentials -------------------
     BINANCE_API_KEY: str = os.getenv("BINANCE_API_KEY", "")
@@ -66,7 +71,7 @@ class Config:
     
     # Super Bollinger Band Parameters
     BB_PERIOD: int = 34
-    BB_DEV: float = 1.750
+    BB_STD_DEV: float = 1.750 # Changed from BB_DEV to match common convention in code
     BB_TREND_PERIOD: int = 9 
 
     # TDI Trade Zones (Match the 25/35/50/65/75 levels)
@@ -76,6 +81,10 @@ class Config:
     TDI_SOFT_SELL_LEVEL: float = 65.0
     TDI_HARD_SELL_LEVEL: float = 75.0
     
+    # 💡 FIX: ADDED ATR Settings required by strategy/consolidated_trend.py
+    ATR_PERIOD: int = safe_int_env("ATR_PERIOD", 14)
+    ATR_MULTIPLIER: float = safe_float_env("ATR_MULTIPLIER", 1.5)
+    
     # --------------------- Risk Management -------------------------
     
     MAX_TOTAL_RISK_CAPITAL_PERCENT: float = safe_float_env("MAX_TOTAL_RISK_CAPITAL_PERCENT", 10.0) 
@@ -84,3 +93,5 @@ class Config:
     # ------------------------ Telegram Bot -------------------------
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# Note: The 'logging' import at the top is crucial for the LOG_LEVEL setting.
