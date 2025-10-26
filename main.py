@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize components
 data_fetcher = DataFetcher()
-strategy = ConsolidatedTrend()
+strategy = ConsolidatedTrendStrategy()
 signal_manager = SignalManager()
 
 # --- Utility Functions ---
