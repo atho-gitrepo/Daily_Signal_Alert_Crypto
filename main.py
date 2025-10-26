@@ -2,15 +2,15 @@
 import time
 import logging
 import pandas as pd
-from typing import Dict, Optional, Tuple, Any, List # Added List import
-from settings import Config
+from typing import Dict, Optional, Tuple, Any, List 
+from settings import Config # Assumed to exist and contain necessary settings
 # Note: Assuming utils.telegram_bot and strategy.consolidated_trend are in your environment
 from utils.telegram_bot import send_telegram_message_sync as send_telegram_message
 from binance.um_futures import UMFutures
 from binance.exceptions import BinanceAPIException, BinanceRequestException
 
 # Import your strategy
-from strategy.consolidated_trend import ConsolidatedTrendStrategy
+from strategy.consolidated_trend import ConsolidatedTrendStrategy # Assumed to exist
 
 # Configure logging
 logging.basicConfig(
@@ -20,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# --- BinanceDataClient Class ---
+# --- BinanceDataClient Class (No changes needed here, copied for completeness) ---
 class BinanceDataClient:
     """Client for fetching real-time and historical data from Binance USD-M Futures."""
 
@@ -123,7 +123,6 @@ class BinanceDataClient:
 
 def escape_markdown(text: str) -> str:
     """Escape Telegram MarkdownV2-sensitive characters."""
-    # List of characters that need escaping in MarkdownV2
     escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in escape_chars:
         text = text.replace(char, f'\{char}')
@@ -144,6 +143,7 @@ def format_signal_message(symbol: str, signal_type: str, signal_data: dict, curr
     if signal_type == "NO_TRADE":
         return f"⚪ No Trade Signal on *{symbol}* | Price: {current_price}"
     
+    # Use data from signal_data or current_price as fallback
     entry = signal_data.get('entry_price', current_price)
     sl = signal_data.get('stop_loss', 0)
     tp = signal_data.get('take_profit', 0)
@@ -168,6 +168,51 @@ def format_signal_message(symbol: str, signal_type: str, signal_data: dict, curr
     )
 
 
+# --- NEW: Signal Conclusion Logic ---
+def check_active_signal_status(symbol: str, current_price: float, state: Dict[str, Any]) -> Tuple[str, Optional[float]]:
+    """
+    Checks if the active signal has hit its Take Profit (TP) or Stop Loss (SL).
+    Returns: (new_status, result_price)
+    """
+    signal_type = state["active_signal_type"]
+    sl = state["active_stop_loss"]
+    tp = state["active_take_profit"]
+
+    # Check for SHORT signal conclusion (price rise hits SL or price fall hits TP)
+    if signal_type == "SELL":
+        if current_price >= sl:
+            logger.info(f"🛑 SELL SIGNAL CONCLUDED (SL) for {symbol} at ${current_price:.4f}")
+            return "LOSS", sl
+        elif current_price <= tp:
+            logger.info(f"🎯 SELL SIGNAL CONCLUDED (TP) for {symbol} at ${current_price:.4f}")
+            return "PROFIT", tp
+
+    # Check for BUY signal conclusion (price fall hits SL or price rise hits TP)
+    elif signal_type == "BUY":
+        if current_price <= sl:
+            logger.info(f"🛑 BUY SIGNAL CONCLUDED (SL) for {symbol} at ${current_price:.4f}")
+            return "LOSS", sl
+        elif current_price >= tp:
+            logger.info(f"🎯 BUY SIGNAL CONCLUDED (TP) for {symbol} at ${current_price:.4f}")
+            return "PROFIT", tp
+    
+    # If active, but neither SL nor TP is hit
+    return "ACTIVE", None
+
+
+def format_conclusion_message(symbol: str, status: str, result_price: float, signal_type: str) -> str:
+    """Format the signal conclusion for Telegram notification."""
+    emoji = "✅" if status == "PROFIT" else "❌"
+    action = "LONG" if signal_type == "BUY" else "SHORT"
+    
+    return (
+        f"{emoji} *{action} SIGNAL CONCLUDED* for *{symbol}* {emoji}\n"
+        f"Result: *{status}*\n" 
+        f"Price: ${result_price:.4f}"
+    )
+# ------------------------------------
+
+
 def main():
     """Main entry point for Binance Data Client with Trading Strategy."""
     logger.info("🚀 Starting Binance Data Client with Consolidated Trend Strategy...")
@@ -180,70 +225,94 @@ def main():
         client = BinanceDataClient()
         strategy = ConsolidatedTrendStrategy()
         
-        safe_send_telegram_message(f"✅ Client & Strategy started. Monitoring: {', '.join(client.price_precisions.keys())} | Min Klines: {MIN_KLINES_REQUIRED}")
+        symbols_monitored = list(client.price_precisions.keys())
+        safe_send_telegram_message(f"✅ Client & Strategy started. Monitoring: {', '.join(symbols_monitored)} | Min Klines: {MIN_KLINES_REQUIRED}")
 
-        # Track last signal and cooldown PER SYMBOL to avoid spam
+        # --- 🎯 ENHANCED STATE TRACKING ---
         symbol_state: Dict[str, Dict[str, Any]] = {
-            symbol: {"last_signal": None, "cooldown": 0} for symbol in client.price_precisions.keys()
+            symbol: {
+                "signal_status": "NONE",          # NONE, ACTIVE, PROFIT, LOSS
+                "active_signal_type": None,       # BUY or SELL
+                "active_entry_price": 0.0,
+                "active_stop_loss": 0.0,
+                "active_take_profit": 0.0,
+                "last_signal_generated": "NONE",  # Last signal generated (can be NO_TRADE)
+            } for symbol in symbols_monitored
         }
-        
-        symbols_to_monitor = list(client.price_precisions.keys())
+        # -----------------------------------
 
         while True:
-            for symbol in symbols_to_monitor:
+            for symbol in symbols_monitored:
                 try:
-                    # 1. Get current price and historical data for the specific symbol
                     current_price = client.get_current_price(symbol)
                     historical_data = client.get_historical_klines(symbol, limit=100)
                     state = symbol_state[symbol]
                     
-                    if not current_price:
-                        logger.warning(f"⚠️ Missing current price for {symbol}. Skipping cycle.")
+                    # Basic checks
+                    if not current_price or historical_data.empty or len(historical_data) < MIN_KLINES_REQUIRED:
+                        if len(historical_data) < MIN_KLINES_REQUIRED:
+                            logger.warning(f"⚠️ Insufficient klines ({len(historical_data)}/{MIN_KLINES_REQUIRED}) for {symbol}. Skipping cycle.")
                         continue
                     
-                    if historical_data.empty:
-                        logger.warning(f"⚠️ Historical data for {symbol} is empty. Skipping cycle.")
-                        continue
+                    # 1. 🔍 Check Status of Active Signal (if one exists)
+                    if state["signal_status"] == "ACTIVE":
+                        new_status, result_price = check_active_signal_status(symbol, current_price, state)
+                        
+                        if new_status in ["PROFIT", "LOSS"]:
+                            # Signal concluded, send alert and reset state
+                            conclusion_message = format_conclusion_message(
+                                symbol, 
+                                new_status, 
+                                result_price, 
+                                state["active_signal_type"]
+                            )
+                            safe_send_telegram_message(conclusion_message)
+                            
+                            # RESET the state to allow new signal generation
+                            state["signal_status"] = "NONE"
+                            state["active_signal_type"] = None
+                            logger.info(f"🔄 State reset for {symbol}. Ready for new signal.")
+                            
+                        else:
+                            # Still ACTIVE, log and skip new signal generation
+                            logger.info(f"✅ Active {state['active_signal_type']} signal for {symbol}. Price: ${current_price:.4f} (SL: ${state['active_stop_loss']:.4f})")
+                            continue # Crucial: Skip to the next symbol
 
-                    # Enforce Minimum Klines Check
-                    if len(historical_data) < MIN_KLINES_REQUIRED:
-                        logger.warning(f"⚠️ Insufficient klines ({len(historical_data)}/{MIN_KLINES_REQUIRED}) for {symbol}. Skipping calculation.")
-                        continue
-
-                    # 2. Analyze data
-                    analyzed_data = strategy.analyze_data(historical_data)
                     
-                    # 🎯 FIX: Changed 'bb_mid' to 'bb_middle' for alignment with indicators.py
-                    if not analyzed_data.empty and 'bb_middle' in analyzed_data.columns: 
-                        # 3. Generate trading signal
+                    # 2. 💡 Generate New Signal (Only if signal_status is NONE)
+                    if state["signal_status"] == "NONE":
+                        
+                        analyzed_data = strategy.analyze_data(historical_data)
+                        
+                        if 'bb_middle' not in analyzed_data.columns:
+                             logger.critical(f"❌ CRASH PREVENTED: 'bb_middle' column missing for {symbol}! Check consolidated_trend.py.")
+                             continue
+                             
                         signal_type, signal_data = strategy.generate_signal(analyzed_data)
                         
-                        # 4. Check for new signal and cooldown status for THIS symbol
-                        is_new_signal = signal_type != "NO_TRADE"
-                        is_not_spamming = (signal_type != state["last_signal"] or state["cooldown"] <= 0) 
+                        # --- Anti-Spam Check: Ensure it's a new trade signal ---
+                        is_new_trade_signal = signal_type in ["BUY", "SELL"]
                         
-                        if is_new_signal and is_not_spamming:
+                        if is_new_trade_signal and signal_type != state["last_signal_generated"]:
+                            
+                            # 3. Send Alert and Update Active State
                             message = format_signal_message(symbol, signal_type, signal_data, current_price)
                             logger.info(f"🎯 Strategy Signal for {symbol}: {signal_type}")
                             safe_send_telegram_message(message)
                             
-                            # Update state
-                            state["last_signal"] = signal_type
-                            state["cooldown"] = 5  # Set cooldown (5 iterations)
+                            # Update active signal state
+                            state["signal_status"] = "ACTIVE"
+                            state["active_signal_type"] = signal_type
+                            state["active_entry_price"] = signal_data.get('entry_price', current_price)
+                            # Ensure SL/TP are available from the signal data (crucial for conclusion)
+                            state["active_stop_loss"] = signal_data.get('stop_loss', 0.0) 
+                            state["active_take_profit"] = signal_data.get('take_profit', 0.0)
+
+                        # Always update the last *generated* signal for history tracking
+                        state["last_signal_generated"] = signal_type
                         
-                        # Decrement cooldown if active
-                        if state["cooldown"] > 0:
-                            state["cooldown"] -= 1
-                            
-                        # Log current status (less verbose)
                         if signal_type == "NO_TRADE":
                             logger.info(f"⚪ No trade signal for {symbol} | Price: {current_price:.4f}")
-                    else:
-                        # 🎯 FIX: Changed 'bb_mid' to 'bb_middle' in the error log
-                        if 'bb_middle' not in analyzed_data.columns:
-                             logger.critical(f"❌ CRASH PREVENTED: 'bb_middle' column missing for {symbol}! Strategy implementation error. Check consolidated_trend.py.")
-                        else:
-                            logger.warning(f"⚠️ Analyzed data for {symbol} is empty after processing")
 
                 except Exception as e:
                     # Localized symbol error handler
