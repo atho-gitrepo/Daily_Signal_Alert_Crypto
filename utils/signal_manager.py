@@ -1,13 +1,15 @@
 # utils/signal_manager.py
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 from enum import Enum
+import pandas as pd  # ⬅️ FIX: Import Pandas to define pd.Series type hint
 
 logger = logging.getLogger(__name__)
 
 # --- Trade Lifecycle Constants ---
 
 class TRADE_LIFECYCLE:
+# ... (rest of TRADE_LIFECYCLE class remains the same) ...
     """Constants for signal status tracking."""
     NONE = "NONE"
     ACTIVE = "ACTIVE"
@@ -15,6 +17,7 @@ class TRADE_LIFECYCLE:
     LOSS = "LOSS"
 
 class SignalStatus(Enum):
+# ... (rest of SignalStatus class remains the same) ...
     """Enums for the trade status (for internal use, matching TRADE_LIFECYCLE)."""
     NONE = 0
     ACTIVE = 1
@@ -24,6 +27,7 @@ class SignalStatus(Enum):
 # --- Markdown V2 Escaping Utility ---
 
 def escape_markdown(text: str) -> str:
+# ... (rest of escape_markdown function remains the same) ...
     """Escapes characters for Telegram's MarkdownV2 parse mode."""
     # List of characters to escape in MarkdownV2
     escape_chars = r'_*[]()~`>#+-=|{}.!'
@@ -32,6 +36,7 @@ def escape_markdown(text: str) -> str:
 # --- Signal Manager Class ---
 
 class SignalManager:
+# ... (rest of SignalManager class remains the same) ...
     """
     Manages the lifecycle and status of active trade signals for anti-spam logic.
     Tracks which symbols have an open signal idea until its SL/TP is hit.
@@ -44,6 +49,7 @@ class SignalManager:
         logger.info("SignalManager initialized.")
 
     def set_active_signal(self, symbol: str, signal_side: str, entry_price: float, details: Dict[str, Any]):
+# ... (rest of set_active_signal function remains the same) ...
         """
         Sets a new signal as ACTIVE, storing its critical trade parameters.
         This immediately activates the anti-spam cooldown for this symbol.
@@ -58,12 +64,14 @@ class SignalManager:
         logger.info(f"Signal set to ACTIVE for {symbol}.")
 
     def clear_signal(self, symbol: str):
+# ... (rest of clear_signal function remains the same) ...
         """Clears the active signal state for a symbol."""
         if symbol in self.active_signals:
             del self.active_signals[symbol]
             logger.info(f"Signal state cleared for {symbol}.")
 
     def get_signal_status(self, symbol: str) -> str:
+# ... (rest of get_signal_status function remains the same) ...
         """Returns the current lifecycle status for a symbol."""
         return self.active_signals.get(symbol, {}).get('status', TRADE_LIFECYCLE.NONE)
 
@@ -107,3 +115,4 @@ class SignalManager:
 
         # If neither SL nor TP was hit
         return TRADE_LIFECYCLE.ACTIVE, 0.0
+
