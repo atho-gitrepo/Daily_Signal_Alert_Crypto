@@ -1,4 +1,4 @@
-# strategy/consolidated_trend.py
+# strategy/consolidated_trend.py (Simplified)
 import pandas as pd
 import numpy as np
 import logging
@@ -22,10 +22,11 @@ class ConsolidatedTrendStrategy:
     def __init__(self):
         logger.info("Consolidated/Trend Trading Strategy (Strict 15min) initialized.")
         # Ensure minimum data required for all indicators is known
+        # The main.py file uses this for checking klines limit
         self.MIN_KLINES_REQUIRED = max(Config.TDI_RSI_PERIOD, Config.BB_PERIOD, Config.TDI_SLOW_MA_PERIOD) + 10
         
-        self.last_signal = "NO_TRADE"
-        self.consecutive_signals = 0
+        # Removed: self.last_signal and self.consecutive_signals
+        # Removed: self._update_signal_state() is no longer needed
 
     def analyze_data(self, df: pd.DataFrame) -> pd.DataFrame:
         """Applies all indicators and prepares data for signal generation."""
@@ -155,7 +156,6 @@ class ConsolidatedTrendStrategy:
         # --- 3. No Trade Zone Check ---
         # When the TDI (SlowMA) is stalling around the 50 level (centerline).
         if abs(tdi_slow_ma - Config.TDI_CENTER_LINE) <= TDI_NO_TRADE_RANGE:
-            self._update_signal_state("NO_TRADE")
             return "NO_TRADE", {"reason": "TDI SlowMA stalling near 50 (Indecision Zone)."}
 
         # --- Volatility Filter Check (Advanced Tips 7) ---
@@ -167,7 +167,6 @@ class ConsolidatedTrendStrategy:
         bearish_crossover = (fast_ma < tdi_slow_ma) and (prev_candle['tdi_fast_ma'] >= prev_candle['tdi_slow_ma'])
         
         # --- BB Rejection Check (Rule 3 & 4) ---
-        # Checks if previous bar touched/moved outside BB and current bar closed back inside/above/below.
         bb_rejection_buy = last_candle['bb_rejection_buy'] 
         bb_rejection_sell = last_candle['bb_rejection_sell'] 
 
@@ -188,7 +187,6 @@ class ConsolidatedTrendStrategy:
                     "note": f"Risk {risk_factor:.1f}x (Hard/Soft). RRR 1:1."
                 }
                 
-                self._update_signal_state("BUY")
                 return "BUY", signal_details
 
         # --- FINAL SELL Signal Check ---
@@ -206,26 +204,9 @@ class ConsolidatedTrendStrategy:
                     "note": f"Risk {risk_factor:.1f}x (Hard/Soft). RRR 1:1."
                 }
                 
-                self._update_signal_state("SELL")
                 return "SELL", signal_details
 
-        self._update_signal_state("NO_TRADE")
         return "NO_TRADE", {"reason": "Conditions for TDI crossover, BB rejection, or TDI zone were not met."}
 
-    def _update_signal_state(self, current_signal: str):
-        """Track consecutive signals to avoid overtrading"""
-        if current_signal == self.last_signal and current_signal != "NO_TRADE":
-            self.consecutive_signals += 1
-        else:
-            self.consecutive_signals = 1
-            self.last_signal = current_signal
-
-    def get_strategy_stats(self) -> Dict:
-        """Get current strategy statistics"""
-        return {
-            "last_signal": self.last_signal,
-            "consecutive_signals": self.consecutive_signals,
-            "min_bb_width": MIN_BB_WIDTH_PERCENT,
-            "max_bb_width": MAX_BB_WIDTH_PERCENT,
-            "rrr_ratio": RRR_RATIO
-        }
+    # Removed: def _update_signal_state()
+    # Removed: def get_strategy_stats() 
