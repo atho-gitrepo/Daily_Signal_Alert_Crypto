@@ -36,20 +36,20 @@ class Config:
     QUOTE_ASSET: str = os.getenv("QUOTE_ASSET", "USDT")
     MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 30) # Increased capacity for more symbols
 
-    # High-liquidity symbols based on Market Capitalization (25+ pairs)
+    # High-liquidity symbols based on Market Capitalization (20+ pairs)
     # This list increases your daily signal potential on the 5m chart.
     SYMBOLS: List[str] = os.getenv(
         "SYMBOLS", 
         (
             "BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,AVAXUSDT,"
-            "DOTUSDT,TRXUSDT,LINKUSDT,MATICUSDT,BCHUSDT,LTCUSDT,UNIUSDT,NEARUSDT,"
-            "ETCUSDT,XLMUSDT,APTUSDT,OPUSDT,ARBIBUSDT,SUIUSDT,INJUSDT,IMXUSDT,"
-            "FILUSDT,ATOMUSDT,VETUSDT,ICPUSDT"
+            "DOTUSDT,TRXUSDT,BCHUSDT,LTCUSDT,UNIUSDT,NEARUSDT,"
+            "ETCUSDT,XLMUSDT,APTUSDT,SUIUSDT,IMXUSDT,"
+            "FILUSDT,ATOMUSDT,VETUSDT"
         )
     ).upper().split(',') # 28 Pairs
     
-    # CRITICAL: Set the timeframe to 5m for day trading focus
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "5m")
+    # CRITICAL: Set the timeframe to 15m for day trading focus
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")
 
     # ----------------------- Polling & API Control ----------------------
     
