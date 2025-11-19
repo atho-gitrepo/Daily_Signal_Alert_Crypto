@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 RRR_RATIO = 1.0 # Target RRR of 1:1
 MIN_BB_WIDTH_PERCENT = 0.003 
 MAX_BB_WIDTH_PERCENT = 0.03
-TDI_NO_TRADE_RANGE = 3 # Margin around 50 for No Trade Zone (i.e., 47 to 53)
+TDI_NO_TRADE_RANGE = 5 # Margin around 50 for No Trade Zone (i.e., 47 to 53)
 MIN_RISK_PERCENT = 0.0015 # 0.15% minimum SL distance
 MAX_RISK_PERCENT = 0.02 # 2% maximum SL distance
 
@@ -62,7 +62,7 @@ class ConsolidatedTrendStrategy:
                     logger.info(f"Market State: {last_state}, BB Width: {last_bb_width:.3f}%")
             
             # Validate we have enough data after indicator calculation
-            if len(df) < 5:  # Need at least 5 candles for reliable signals
+            if len(df) < 15:  # Need at least 5 candles for reliable signals
                 logger.warning(f"Insufficient data after indicator calculation: {len(df)} candles")
                 return pd.DataFrame()
                 
@@ -88,7 +88,7 @@ class ConsolidatedTrendStrategy:
                 return entry_price, 0, 0
 
             # Use 10 bars for swing low/high approximation
-            lookback_period = 10 
+            lookback_period = 30 
             start_idx = max(0, len(df) - lookback_period)
             lookback_df = df.iloc[start_idx:-1]  # Exclude current candle
             
