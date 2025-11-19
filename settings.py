@@ -37,7 +37,7 @@ class Config:
     MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 30) # Increased capacity for more symbols
 
     # High-liquidity symbols based on Market Capitalization (25+ pairs)
-    # This list increases your daily signal potential on the 15m chart.
+    # This list increases your daily signal potential on the 5m chart.
     SYMBOLS: List[str] = os.getenv(
         "SYMBOLS", 
         (
@@ -48,8 +48,8 @@ class Config:
         )
     ).upper().split(',') # 28 Pairs
     
-    # CRITICAL: Set the timeframe to 15m for day trading focus
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")
+    # CRITICAL: Set the timeframe to 5m for day trading focus
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "5m")
 
     # ----------------------- Polling & API Control ----------------------
     
