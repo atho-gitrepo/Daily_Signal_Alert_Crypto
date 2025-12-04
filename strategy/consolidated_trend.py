@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Tuple, Dict, Optional
-from utils.indicators import Indicators
+from utils.indicators import Indicators # Assuming this is the correct import
 from settings import Config 
 
 logger = logging.getLogger(__name__)
@@ -19,13 +19,14 @@ MAX_RISK_PERCENT = 0.02 # 2% maximum SL distance
 # --- Strategy Class ---
 class ConsolidatedTrendStrategy:
     def __init__(self):
-        logger.info("Consolidated/Trend Trading Strategy (Strict 15min) initialized.")
+        logger.info("Consolidated/Trend Trading Strategy (Super BB + TDI) initialized.")
         # Ensure minimum data required for all indicators is known
         self.MIN_KLINES_REQUIRED = max(
             getattr(Config, 'TDI_RSI_PERIOD', 14),
             getattr(Config, 'TDI_BB_LENGTH', 34),
             getattr(Config, 'BB_PERIOD', 20),
-            getattr(Config, 'TDI_SLOW_MA_PERIOD', 5)
+            getattr(Config, 'TDI_SLOW_MA_PERIOD', 5),
+            200 # For 200 EMA
         ) + 20  # Added buffer for stable calculations
         
         self.last_signal = "NO_TRADE"
@@ -87,7 +88,7 @@ class ConsolidatedTrendStrategy:
                 logger.error(f"Invalid entry price: {entry_price}")
                 return entry_price, 0, 0
 
-            # Use 10 bars for swing low/high approximation
+            # Use 30 bars for swing low/high approximation
             lookback_period = 30 
             start_idx = max(0, len(df) - lookback_period)
             lookback_df = df.iloc[start_idx:-1]  # Exclude current candle
@@ -226,7 +227,8 @@ class ConsolidatedTrendStrategy:
             
         # Check if indicators are properly calculated
         required_indicators = ['tdi_slow_ma', 'tdi_fast_ma', 'bb_width_percent', 
-                              'bb_rejection_buy', 'bb_rejection_sell']
+                              'bb_upper', 'bb_lower', 'bb_middle', 'ema_200',
+                              'stoch_k', 'stoch_d'] # Added new BB/MA/Stoch checks
         
         for indicator in required_indicators:
             if indicator not in df.columns:
@@ -238,13 +240,113 @@ class ConsolidatedTrendStrategy:
                 return False, f"NaN values in {indicator}"
                 
         return True, "All conditions valid"
+        
+    # --- NEW: BB Signal Checks ---
+    def _check_bb_long_breakout(self, current, prev) -> bool:
+        """Price closes above Upper Band (breakout)."""
+        # Close above Upper Band, confirming the breakout.
+        is_breakout = (current['close'] > current['bb_upper'])
+        
+        # Optional: Check if the previous candle was not already above the upper band
+        # is_fresh_breakout = (prev['close'] <= prev['bb_upper']) 
+
+        return is_breakout
+
+    def _check_bb_long_pullback(self, current, prev) -> bool:
+        """Price pulls back to Middle Band (20 SMA) and holds."""
+        middle_band = current['bb_middle']
+        
+        # 1. Price is currently above Middle Band (holding the support)
+        is_above_middle = current['close'] > middle_band
+        
+        # 2. Price touched or came near the Middle Band recently (pullback)
+        is_pullback_touch = (current['low'] <= middle_band)
+        
+        # 3. Confirmation: The current candle is bullish (close > open)
+        is_bullish_hold = current['close'] > current['open']
+        
+        # A strong pullback signal is when price touches MB and closes bullishly above it
+        return is_above_middle and is_pullback_touch and is_bullish_hold
+
+    def _check_bb_short_breakdown(self, current, prev) -> bool:
+        """Price closes below Lower Band (breakdown)."""
+        is_breakdown = (current['close'] < current['bb_lower'])
+        return is_breakdown
+
+    def _check_bb_short_rejection(self, current, prev) -> bool:
+        """Price rallies to Middle Band and rejects."""
+        middle_band = current['bb_middle']
+
+        # 1. Price is currently below Middle Band (rejecting the resistance)
+        is_below_middle = current['close'] < middle_band
+
+        # 2. Price touched or came near the Middle Band recently (rejection)
+        is_rejection_touch = (current['high'] >= middle_band)
+
+        # 3. Confirmation: The current candle is bearish (close < open)
+        is_bearish_rejection = current['close'] < current['open']
+
+        # A strong rejection signal is when price touches MB and closes bearishly below it
+        return is_below_middle and is_rejection_touch and is_bearish_rejection
+        
+    # --- NEW: TDI Signal Checks ---
+    def _check_tdi_long_signal(self, current) -> bool:
+        """Checks RSI > Bulls Line AND Stochastic rising from below 30."""
+        
+        # 1. RSI > Bulls Line (Using the Fast MA as the 'RSI' signal line, and the 50 line as the Bulls threshold for strong momentum)
+        # Note: The rule 'RSI > Bulls Line (2)' is unconventional. We use Fast MA > Slow MA and > 50 for strong trend momentum.
+        is_tdi_momentum = (current['tdi_fast_ma'] > current['tdi_slow_ma']) and (current['tdi_fast_ma'] > 50)
+        
+        # 2. Stochastic %K > %D and rising from below 30
+        is_stoch_confirm = (current['stoch_k'] > current['stoch_d'])
+        is_stoch_oversold_rising = is_stoch_confirm and (current['stoch_k'] < 30)
+        
+        # For a long, we want bullish momentum and either a clean stochastic confirmation OR a rising from oversold confirmation
+        return is_tdi_momentum and (is_stoch_confirm or is_stoch_oversold_rising)
+
+    def _check_tdi_short_signal(self, current) -> bool:
+        """Checks RSI < Bears Line AND Stochastic falling from above 70."""
+
+        # 1. RSI < Bears Line 
+        is_tdi_momentum = (current['tdi_fast_ma'] < current['tdi_slow_ma']) and (current['tdi_fast_ma'] < 50)
+        
+        # 2. Stochastic %K < %D and falling from above 70
+        is_stoch_confirm = (current['stoch_k'] < current['stoch_d'])
+        is_stoch_overbought_falling = is_stoch_confirm and (current['stoch_k'] > 70)
+        
+        # For a short, we want bearish momentum and either a clean stochastic confirmation OR a falling from overbought confirmation
+        return is_tdi_momentum and (is_stoch_confirm or is_stoch_overbought_falling)
+        
+    # --- NEW: Trend Filter Check ---
+    def _check_trend_filter(self, current, signal_type: str) -> bool:
+        """Checks Price > 200 EMA for LONG, Price < 200 EMA for SHORT."""
+        ema_200 = current['ema_200']
+        price = current['close']
+        
+        if pd.isna(ema_200):
+            logger.warning("200 EMA is NaN, trend filter skipped.")
+            return True # Skip filter if data is missing
+
+        if signal_type == "BUY":
+            is_uptrend = price > ema_200
+            if not is_uptrend:
+                logger.debug(f"Trend Filter: Price ({price:.4f}) not above 200 EMA ({ema_200:.4f})")
+            return is_uptrend
+        
+        elif signal_type == "SELL":
+            is_downtrend = price < ema_200
+            if not is_downtrend:
+                logger.debug(f"Trend Filter: Price ({price:.4f}) not below 200 EMA ({ema_200:.4f})")
+            return is_downtrend
+            
+        return False
+
 
     def generate_signal(self, df):
         """
-        Implements the Consolidated/Trend Trading Strategy strictly.
-        ENHANCED VERSION with comprehensive validation.
+        Implements the Combined Super BB + Super TDI Trading System rules.
         """
-        logger.info("=== GENERATING SIGNAL ===")
+        logger.info("=== GENERATING SIGNAL (Super BB + TDI) ===")
         
         # Validate overall conditions
         conditions_ok, conditions_msg = self._validate_signal_conditions(df)
@@ -256,122 +358,102 @@ class ConsolidatedTrendStrategy:
         last_candle = df.iloc[-1]
         prev_candle = df.iloc[-2]
 
-        # Extract key indicators with NaN checks
+        # Extract key indicators
         try:
-            tdi_slow_ma = last_candle['tdi_slow_ma']     # Red Line (Bears MA)
-            fast_ma = last_candle['tdi_fast_ma']         # Green Line (Bulls MA)
+            tdi_slow_ma = last_candle['tdi_slow_ma']
             bb_width_percent = last_candle['bb_width_percent']
-            
-            # Log current indicator values
-            logger.info(f"TDI Slow MA: {tdi_slow_ma:.2f}, Fast MA: {fast_ma:.2f}, BB Width: {bb_width_percent:.4f}")
-            
         except KeyError as e:
-            logger.error(f"Missing indicator column: {e}")
+            logger.error(f"Missing essential indicator column: {e}")
             self._update_signal_state("NO_TRADE")
             return "NO_TRADE", {"reason": f"Missing indicator: {e}"}
 
-        # --- 3. No Trade Zone Check ---
-        # When the TDI (SlowMA) is stalling around the 50 level (centerline).
-        center_line = getattr(Config, 'TDI_CENTER_LINE', 50)
-        if abs(tdi_slow_ma - center_line) <= TDI_NO_TRADE_RANGE:
-            logger.debug(f"TDI in No-Trade Zone: {tdi_slow_ma:.2f} near {center_line}")
+        # --- Filters (1, 2) ---
+        if abs(tdi_slow_ma - 50) <= TDI_NO_TRADE_RANGE:
+            logger.debug(f"TDI in No-Trade Zone: {tdi_slow_ma:.2f} near 50")
             self._update_signal_state("NO_TRADE")
-            return "NO_TRADE", {"reason": f"TDI SlowMA stalling near {center_line} (Indecision Zone)."}
+            return "NO_TRADE", {"reason": "TDI SlowMA stalling near 50 (Indecision Zone)."}
 
-        # --- Volatility Filter Check (Advanced Tips 7) ---
         if not self._check_volatility_filter(bb_width_percent):
             self._update_signal_state("NO_TRADE")
             return "NO_TRADE", {"reason": "Volatility Filter: BB Width outside optimal range."}
 
-        # --- Crossover Check (Rule 2) ---
-        bullish_crossover = (fast_ma > tdi_slow_ma) and (prev_candle['tdi_fast_ma'] <= prev_candle['tdi_slow_ma'])
-        bearish_crossover = (fast_ma < tdi_slow_ma) and (prev_candle['tdi_fast_ma'] >= prev_candle['tdi_slow_ma'])
+
+        signal = "NO_TRADE"
+        signal_reason = "No entry conditions met."
+        risk_factor = 1.0 # Initialize risk factor
         
-        # --- BB Rejection Check (Rule 3 & 4) ---
-        bb_rejection_buy = last_candle['bb_rejection_buy'] 
-        bb_rejection_sell = last_candle['bb_rejection_sell'] 
-
-        logger.debug(f"Crossovers - Bullish: {bullish_crossover}, Bearish: {bearish_crossover}")
-        logger.debug(f"BB Rejections - Buy: {bb_rejection_buy}, Sell: {bb_rejection_sell}")
-
-        signal_details = {}
-
-        # --- FINAL BUY Signal Check ---
-        if bullish_crossover and bb_rejection_buy:
-            logger.info("BUY conditions met: Bullish crossover + BB rejection")
-            zone_ok, risk_factor = self._check_tdi_zone(tdi_slow_ma, "BUY")
+        # --- LONG ENTRY CHECK ---
+        is_long_breakout = self._check_bb_long_breakout(last_candle, prev_candle)
+        is_long_pullback = self._check_bb_long_pullback(last_candle, prev_candle)
+        
+        if is_long_breakout or is_long_pullback:
             
-            if zone_ok:
-                entry, sl, tp = self._calculate_structural_sl_tp(df, last_candle, "BUY", risk_factor)
-                
-                # Validate SL/TP calculation
-                if sl > 0 and tp > 0:
-                    signal_strength = "HARD" if risk_factor == 2.0 else "SOFT"
-                    
-                    signal_details = {
-                        "entry_price": entry, 
-                        "stop_loss": sl, 
-                        "take_profit": tp,
-                        "risk_factor": risk_factor, 
-                        "tdi_slow_ma": tdi_slow_ma,
-                        "signal_strength": signal_strength,
-                        "bb_width_percent": bb_width_percent,
-                        "market_state": last_candle.get('market_state', 'UNKNOWN'),
-                        "note": f"Risk {risk_factor:.1f}x ({signal_strength}). RRR 1:1.",
-                        "timestamp": pd.Timestamp.now()
-                    }
-                    
-                    logger.info(f"🔴 BUY SIGNAL GENERATED - Entry: {entry:.4f}, SL: {sl:.4f}, TP: {tp:.4f}")
-                    self._update_signal_state("BUY")
-                    return "BUY", signal_details
-                else:
-                    logger.warning("BUY signal rejected: Invalid SL/TP calculation")
-            else:
-                logger.debug("BUY signal rejected: TDI zone not suitable")
-
-        # --- FINAL SELL Signal Check ---
-        if bearish_crossover and bb_rejection_sell:
-            logger.info("SELL conditions met: Bearish crossover + BB rejection")
-            zone_ok, risk_factor = self._check_tdi_zone(tdi_slow_ma, "SELL")
+            tdi_long_ok = self._check_tdi_long_signal(last_candle)
             
-            if zone_ok:
-                entry, sl, tp = self._calculate_structural_sl_tp(df, last_candle, "SELL", risk_factor)
+            if ti_long_ok:
+                trend_ok = self._check_trend_filter(last_candle, "BUY")
+                zone_ok, risk_factor = self._check_tdi_zone(tdi_slow_ma, "BUY")
                 
-                # Validate SL/TP calculation
-                if sl > 0 and tp > 0:
-                    signal_strength = "HARD" if risk_factor == 2.0 else "SOFT"
-                    
-                    signal_details = {
-                        "entry_price": entry, 
-                        "stop_loss": sl, 
-                        "take_profit": tp,
-                        "risk_factor": risk_factor, 
-                        "tdi_slow_ma": tdi_slow_ma,
-                        "signal_strength": signal_strength,
-                        "bb_width_percent": bb_width_percent,
-                        "market_state": last_candle.get('market_state', 'UNKNOWN'),
-                        "note": f"Risk {risk_factor:.1f}x ({signal_strength}). RRR 1:1.",
-                        "timestamp": pd.Timestamp.now()
-                    }
-                    
-                    logger.info(f"🔴 SELL SIGNAL GENERATED - Entry: {entry:.4f}, SL: {sl:.4f}, TP: {tp:.4f}")
-                    self._update_signal_state("SELL")
-                    return "SELL", signal_details
-                else:
-                    logger.warning("SELL signal rejected: Invalid SL/TP calculation")
-            else:
-                logger.debug("SELL signal rejected: TDI zone not suitable")
+                if trend_ok and zone_ok:
+                    # NOTE: Volume check (Rule 3) is a placeholder, as volume data is not available.
+                    signal = "BUY"
+                    entry_type = 'Breakout' if is_long_breakout else 'Pullback'
+                    signal_reason = f"LONG ENTRY: BB {entry_type} + TDI Momentum + Trend Filter. Risk Factor: {risk_factor}x"
 
+
+        # --- SHORT ENTRY CHECK (Only check if no LONG signal was found) ---
+        if signal == "NO_TRADE": 
+            is_short_breakdown = self._check_bb_short_breakdown(last_candle, prev_candle)
+            is_short_rejection = self._check_bb_short_rejection(last_candle, prev_candle)
+            
+            if is_short_breakdown or is_short_rejection:
+                
+                tdi_short_ok = self._check_tdi_short_signal(last_candle)
+                
+                if tdi_short_ok:
+                    trend_ok = self._check_trend_filter(last_candle, "SELL")
+                    zone_ok, risk_factor = self._check_tdi_zone(tdi_slow_ma, "SELL")
+                    
+                    if trend_ok and zone_ok:
+                        # NOTE: Volume check (Rule 3) is a placeholder.
+                        signal = "SELL"
+                        entry_type = 'Breakdown' if is_short_breakdown else 'Rejection'
+                        signal_reason = f"SHORT ENTRY: BB {entry_type} + TDI Momentum + Trend Filter. Risk Factor: {risk_factor}x"
+
+
+        # --- FINAL SIGNAL EXECUTION ---
+        if signal != "NO_TRADE":
+            entry, sl, tp = self._calculate_structural_sl_tp(df, last_candle, signal, risk_factor)
+            
+            if sl > 0 and tp > 0:
+                signal_strength = "HARD" if risk_factor == 2.0 else "SOFT"
+                
+                signal_details = {
+                    "entry_price": entry, 
+                    "stop_loss": sl, 
+                    "take_profit": tp,
+                    "risk_factor": risk_factor, 
+                    "tdi_slow_ma": tdi_slow_ma,
+                    "signal_strength": signal_strength,
+                    "bb_width_percent": bb_width_percent,
+                    "market_state": last_candle.get('market_state', 'UNKNOWN'),
+                    "note": signal_reason,
+                    "timestamp": pd.Timestamp.now()
+                }
+                
+                logger.info(f"🔴 {signal} SIGNAL GENERATED - {signal_reason}")
+                self._update_signal_state(signal)
+                return signal, signal_details
+            else:
+                logger.warning(f"{signal} signal rejected: Invalid SL/TP calculation")
+                signal = "NO_TRADE"
+                signal_reason = "Invalid SL/TP calculation."
+
+        
         # No trade conditions
-        no_trade_reason = "Conditions for TDI crossover, BB rejection, or TDI zone were not met."
-        if not (bullish_crossover or bearish_crossover):
-            no_trade_reason = "No TDI crossover detected."
-        elif not (bb_rejection_buy or bb_rejection_sell):
-            no_trade_reason = "No BB rejection detected."
-            
-        logger.debug(f"No trade: {no_trade_reason}")
+        logger.debug(f"No trade: {signal_reason}")
         self._update_signal_state("NO_TRADE")
-        return "NO_TRADE", {"reason": no_trade_reason}
+        return "NO_TRADE", {"reason": signal_reason}
 
     def _update_signal_state(self, current_signal: str):
         """Track consecutive signals to avoid overtrading"""
