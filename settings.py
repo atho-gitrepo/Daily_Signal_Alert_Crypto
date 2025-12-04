@@ -1,4 +1,4 @@
-#  settings.py 
+# settings.py
 import os
 from typing import List
 
@@ -21,7 +21,7 @@ def safe_int_env(key: str, default: int) -> int:
 class Config:
     """
     Configuration settings for Binance data client and strategy.
-    Optimized for multi-symbol trading and strict 15-minute strategy.
+    Optimized for multi-symbol trading and the Super BB + TDI strategy.
     """
 
     # ------------------- Binance API Credentials -------------------
@@ -36,8 +36,7 @@ class Config:
     QUOTE_ASSET: str = os.getenv("QUOTE_ASSET", "USDT")
     MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 30) # Increased capacity for more symbols
 
-    # High-liquidity symbols based on Market Capitalization (20+ pairs)
-    # This list increases your daily signal potential on the 5m chart.
+    # High-liquidity symbols
     SYMBOLS: List[str] = os.getenv(
         "SYMBOLS", 
         (
@@ -46,10 +45,11 @@ class Config:
             "ETCUSDT,XLMUSDT,APTUSDT,SUIUSDT,IMXUSDT,"
             "FILUSDT,ATOMUSDT,VETUSDT"
         )
-    ).upper().split(',') # 28 Pairs
+    ).upper().split(',')
     
-    # CRITICAL: Set the timeframe to 15m for day trading focus
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "1H")
+    # CRITICAL: Set the timeframe (Ensure this is appropriate for your strategy)
+    # The TDI/BB strategy is typically used on H4/H1, but H1 is set here.
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "1H") 
 
     # ----------------------- Polling & API Control ----------------------
     
@@ -59,22 +59,32 @@ class Config:
     # --------------------- Strategy Parameters (Confirming Strict Rules) ---------------------
     
     # TDI Parameters (Must match the Pine Script logic)
-    TDI_RSI_PERIOD: int = 10 
-    TDI_BB_LENGTH: int = 20 
-    TDI_FAST_MA_PERIOD: int = 1 # Green Line
-    TDI_SLOW_MA_PERIOD: int = 5 # Red Line
+    TDI_RSI_PERIOD: int = safe_int_env("TDI_RSI_PERIOD", 10)
+    TDI_BB_LENGTH: int = safe_int_env("TDI_BB_LENGTH", 20)
+    TDI_FAST_MA_PERIOD: int = safe_int_env("TDI_FAST_MA_PERIOD", 1) # Green Line (Bulls)
+    TDI_SLOW_MA_PERIOD: int = safe_int_env("TDI_SLOW_MA_PERIOD", 5) # Red Line (Bears)
     
     # Super Bollinger Band Parameters
-    BB_PERIOD: int = 34
-    BB_DEV: float = 1.750
-    BB_TREND_PERIOD: int = 9 
+    BB_PERIOD: int = safe_int_env("BB_PERIOD", 34)
+    BB_DEV: float = safe_float_env("BB_DEV", 1.750)
+    BB_TREND_PERIOD: int = safe_int_env("BB_TREND_PERIOD", 9) # For SMMA approximation
 
     # TDI Trade Zones (Match the 25/35/50/65/75 levels)
-    TDI_CENTER_LINE: float = 50.0 
-    TDI_SOFT_BUY_LEVEL: float = 35.0
-    TDI_HARD_BUY_LEVEL: float = 25.0
-    TDI_SOFT_SELL_LEVEL: float = 65.0
-    TDI_HARD_SELL_LEVEL: float = 75.0
+    TDI_CENTER_LINE: float = safe_float_env("TDI_CENTER_LINE", 50.0) 
+    TDI_SOFT_BUY_LEVEL: float = safe_float_env("TDI_SOFT_BUY_LEVEL", 35.0)
+    TDI_HARD_BUY_LEVEL: float = safe_float_env("TDI_HARD_BUY_LEVEL", 25.0)
+    TDI_SOFT_SELL_LEVEL: float = safe_float_env("TDI_SOFT_SELL_LEVEL", 65.0)
+    TDI_HARD_SELL_LEVEL: float = safe_float_env("TDI_HARD_SELL_LEVEL", 75.0)
+    
+    # --- NEW: Additional Indicators for Strategy Confirmation ---
+    
+    # 200 EMA for Trend Filter
+    EMA_200_PERIOD: int = safe_int_env("EMA_200_PERIOD", 200)
+
+    # Stochastic Oscillator for Momentum/Oversold/Overbought
+    STOCH_K_PERIOD: int = safe_int_env("STOCH_K_PERIOD", 14)
+    STOCH_D_PERIOD: int = safe_int_env("STOCH_D_PERIOD", 3)
+    STOCH_SMOOTHING: int = safe_int_env("STOCH_SMOOTHING", 3)
     
     # --------------------- Risk Management -------------------------
     
