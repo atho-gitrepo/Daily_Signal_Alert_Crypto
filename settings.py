@@ -49,7 +49,7 @@ class Config:
     
     # CRITICAL: Set the timeframe (Ensure this is appropriate for your strategy)
     # The TDI/BB strategy is typically used on H4/H1, but H1 is set here.
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "1H") 
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m") 
 
     # ----------------------- Polling & API Control ----------------------
     
