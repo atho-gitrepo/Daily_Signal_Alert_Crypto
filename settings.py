@@ -59,21 +59,17 @@ class Config:
     # --------------------- Strategy Parameters (Strict 5m Scalping) ---------------------
     
     # Traders Dynamic Index (TDI) Parameters
-    # TDI_RSI_PERIOD (13): Smooths RSI noise on a fast chart.
-    # TDI_BB_LENGTH (34): Uses a slower period for TDI BB to act as a reliable major trend filter.
     TDI_RSI_PERIOD: int = 13
-    TDI_BB_LENGTH: int = 34
-    TDI_FAST_MA_PERIOD: int = 1 # Green Line (Quick reaction)
+    TDI_BB_LENGTH: int = 34 # Slower BB on RSI for major trend filtering
+    TDI_FAST_MA_PERIOD: int = 1 # Green Line 
     TDI_SLOW_MA_PERIOD: int = 7 # Red Line (Slower trend confirmation)
     
     # Super Bollinger Band Parameters (Price action)
-    # BB_PERIOD (20): Standard period for short-term volatility and rejection mapping.
-    # BB_DEV (2.0): Standard 2.0 deviation for identifying true price extremes.
-    BB_PERIOD: int = 20
-    BB_DEV: float = 2.0
+    BB_PERIOD: int = 20 # Standard period for short-term volatility and rejection mapping.
+    BB_DEV: float = 2.0 # Standard 2.0 deviation for identifying true price extremes.
     BB_TREND_PERIOD: int = 9 
 
-    # TDI Trade Zones (Match the 25/35/50/65/75 levels used in strategy logic)
+    # TDI Trade Zones
     TDI_CENTER_LINE: float = 50.0 
     TDI_SOFT_BUY_LEVEL: float = 35.0
     TDI_HARD_BUY_LEVEL: float = 25.0
@@ -82,7 +78,6 @@ class Config:
     
     # --------------------- Risk Management -------------------------
     
-    # Conservative risk limits highly recommended for 5m trading
     MAX_TOTAL_RISK_CAPITAL_PERCENT: float = safe_float_env("MAX_TOTAL_RISK_CAPITAL_PERCENT", 10.0) 
     RISK_PER_TRADE_PERCENT: float = safe_float_env("RISK_PER_TRADE_PERCENT", 0.5)
     
