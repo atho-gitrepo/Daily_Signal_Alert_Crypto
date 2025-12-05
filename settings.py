@@ -1,4 +1,4 @@
-#  settings.py 
+# settings.py 
 import os
 from typing import List
 
@@ -21,7 +21,7 @@ def safe_int_env(key: str, default: int) -> int:
 class Config:
     """
     Configuration settings for Binance data client and strategy.
-    Optimized for multi-symbol trading and strict 15-minute strategy.
+    Optimized for multi-symbol 5-minute (5m) scalping/trend trading.
     """
 
     # ------------------- Binance API Credentials -------------------
@@ -34,10 +34,9 @@ class Config:
     # ------------------------ Market Data --------------------------
     
     QUOTE_ASSET: str = os.getenv("QUOTE_ASSET", "USDT")
-    MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 30) # Increased capacity for more symbols
+    MAX_SYMBOLS: int = safe_int_env("MAX_SYMBOLS", 30) 
 
-    # High-liquidity symbols based on Market Capitalization (20+ pairs)
-    # This list increases your daily signal potential on the 5m chart.
+    # High-liquidity symbols (approx. 20+ pairs)
     SYMBOLS: List[str] = os.getenv(
         "SYMBOLS", 
         (
@@ -46,30 +45,35 @@ class Config:
             "ETCUSDT,XLMUSDT,APTUSDT,SUIUSDT,IMXUSDT,"
             "FILUSDT,ATOMUSDT,VETUSDT"
         )
-    ).upper().split(',') # 28 Pairs
+    ).upper().split(',') 
     
     # CRITICAL: Set the timeframe to 5m for day trading focus
     TIMEFRAME: str = os.getenv("TIMEFRAME", "5m")
 
     # ----------------------- Polling & API Control ----------------------
     
-    POLLING_INTERVAL_SECONDS: int = safe_int_env("POLLING_INTERVAL_SECONDS", 60)
+    # CRITICAL: Reduced to 30s to accurately catch 5m candle closures
+    POLLING_INTERVAL_SECONDS: int = safe_int_env("POLLING_INTERVAL_SECONDS", 30)
     API_TIMEOUT_SECONDS: int = safe_int_env("API_TIMEOUT_SECONDS", 10)
     
-    # --------------------- Strategy Parameters (Confirming Strict Rules) ---------------------
+    # --------------------- Strategy Parameters (Strict 5m Scalping) ---------------------
     
-    # TDI Parameters (Must match the Pine Script logic)
-    TDI_RSI_PERIOD: int = 10 
-    TDI_BB_LENGTH: int = 20 
-    TDI_FAST_MA_PERIOD: int = 1 # Green Line
-    TDI_SLOW_MA_PERIOD: int = 5 # Red Line
+    # Traders Dynamic Index (TDI) Parameters
+    # TDI_RSI_PERIOD (13): Smooths RSI noise on a fast chart.
+    # TDI_BB_LENGTH (34): Uses a slower period for TDI BB to act as a reliable major trend filter.
+    TDI_RSI_PERIOD: int = 13
+    TDI_BB_LENGTH: int = 34
+    TDI_FAST_MA_PERIOD: int = 1 # Green Line (Quick reaction)
+    TDI_SLOW_MA_PERIOD: int = 7 # Red Line (Slower trend confirmation)
     
-    # Super Bollinger Band Parameters
-    BB_PERIOD: int = 34
-    BB_DEV: float = 1.750
+    # Super Bollinger Band Parameters (Price action)
+    # BB_PERIOD (20): Standard period for short-term volatility and rejection mapping.
+    # BB_DEV (2.0): Standard 2.0 deviation for identifying true price extremes.
+    BB_PERIOD: int = 20
+    BB_DEV: float = 2.0
     BB_TREND_PERIOD: int = 9 
 
-    # TDI Trade Zones (Match the 25/35/50/65/75 levels)
+    # TDI Trade Zones (Match the 25/35/50/65/75 levels used in strategy logic)
     TDI_CENTER_LINE: float = 50.0 
     TDI_SOFT_BUY_LEVEL: float = 35.0
     TDI_HARD_BUY_LEVEL: float = 25.0
@@ -78,6 +82,7 @@ class Config:
     
     # --------------------- Risk Management -------------------------
     
+    # Conservative risk limits highly recommended for 5m trading
     MAX_TOTAL_RISK_CAPITAL_PERCENT: float = safe_float_env("MAX_TOTAL_RISK_CAPITAL_PERCENT", 10.0) 
     RISK_PER_TRADE_PERCENT: float = safe_float_env("RISK_PER_TRADE_PERCENT", 0.5)
     
