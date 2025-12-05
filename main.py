@@ -2,9 +2,10 @@
 import time
 import logging
 import pandas as pd
-from typing import Dict, Optional, Tuple, Any, List # Added List import
+from typing import Dict, Optional, Tuple, Any, List 
 from settings import Config
-# Note: Assuming utils.telegram_bot and strategy.consolidated_trend are in your environment
+# NOTE: Adjusted import path for indicators to reflect assumed project structure
+from utils.indicators import Indicators 
 from utils.telegram_bot import send_telegram_message_sync as send_telegram_message
 from binance.um_futures import UMFutures
 from binance.exceptions import BinanceAPIException, BinanceRequestException
@@ -29,9 +30,6 @@ class BinanceDataClient:
         self.api_secret = Config.BINANCE_API_SECRET
         self.is_testnet = Config.BINANCE_TESTNET
 
-        if not self.api_key or not self.api_secret:
-            logger.warning("⚠️ Binance API Key/Secret not set. Using public endpoints (rate-limited).")
-
         base_url = "https://testnet.binancefuture.com" if self.is_testnet else "https://fapi.binance.com"
         
         if self.api_key and self.api_secret:
@@ -43,15 +41,13 @@ class BinanceDataClient:
         else:
             self.futures_client = UMFutures(base_url=base_url)
 
-        # Store precision data for all configured symbols
         self.price_precisions: Dict[str, int] = {}
-        self._get_symbol_precisions() # Fetch precision for all symbols
+        self._get_symbol_precisions() 
         logger.info(f"✅ Binance Data Client initialized. Testnet: {self.is_testnet}")
 
 
     def _get_symbol_precisions(self):
         """Fetch price precision for all configured symbols from exchange info."""
-        # Symbol cleaning check (from previous steps)
         valid_symbols = [s for s in Config.SYMBOLS if s.endswith(Config.QUOTE_ASSET) and s != Config.QUOTE_ASSET]
         if not valid_symbols:
             logger.error(f"❌ No valid symbols found! Check your SYMBOLS and QUOTE_ASSET config.")
@@ -60,7 +56,6 @@ class BinanceDataClient:
         try:
             info = self.futures_client.exchange_info()
             
-            # Use the list of symbols from Config
             for symbol in valid_symbols:
                 symbol_info = next(
                     (s for s in info['symbols'] if s['symbol'] == symbol),
@@ -76,7 +71,6 @@ class BinanceDataClient:
                         precision = len(step_size.split('.')[-1].rstrip('0'))
                         self.price_precisions[symbol] = precision
             
-            logger.info(f"ℹ️ Fetched price precisions for {list(self.price_precisions.keys())}")
         except Exception as e:
             logger.error(f"❌ Could not fetch symbol precisions. Error: {e}")
 
@@ -139,33 +133,39 @@ def safe_send_telegram_message(message: str):
         logger.error(f"❌ Failed to send Telegram message: {e}")
 
 
+# --- NEW: Formats the message using the strength logic from indicators.py ---
 def format_signal_message(symbol: str, signal_type: str, signal_data: dict, current_price: float) -> str:
-    """Format trading signal for Telegram notification, including the symbol."""
+    """Format trading signal for Telegram notification, incorporating strength and details."""
+    
+    # Get strength from strategy details (will be HARD or SOFT)
+    signal_strength = signal_data.get('signal_strength', 'SOFT') 
+    
+    # Use Indicators utility to get the dynamic header
+    header, action = Indicators.get_alert_message_header(signal_type, signal_strength, symbol)
+    
     if signal_type == "NO_TRADE":
-        return f"⚪ No Trade Signal on *{symbol}* | Price: {current_price}"
+        reason = signal_data.get('reason', 'Conditions not met.')
+        return f"⚪ No Trade Signal on *{symbol}* | Price: ${current_price:.4f}\n*Reason*: {reason}"
     
     entry = signal_data.get('entry_price', current_price)
     sl = signal_data.get('stop_loss', 0)
     tp = signal_data.get('take_profit', 0)
     risk_factor = signal_data.get('risk_factor', 1.0)
-    tdi_value = signal_data.get('tdi_value', 0)
-    
-    if signal_type == "BUY":
-        emoji = "🟢"
-        action = "LONG"
-    else:  # SELL
-        emoji = "🔴" 
-        action = "SHORT"
+    tdi_slow_ma = signal_data.get('tdi_slow_ma', 0)
+    bb_width = signal_data.get('bb_width_percent', 0)
     
     return (
-        f"{emoji} *{action} SIGNAL* for *{symbol}* {emoji}\n"
-        f"💰 Entry: ${entry:.4f}\n" 
-        f"🛑 Stop Loss: ${sl:.4f}\n"
-        f"🎯 Take Profit: ${tp:.4f}\n"
-        f"📊 Current: ${current_price:.4f}\n"
-        f"⚖️ Risk Factor: {risk_factor}x\n"
-        f"📈 TDI RSI: {tdi_value:.2f}"
+        f"{header}\n"
+        f"---"
+        f"\n*{signal_strength} {action} SIGNAL*\n"
+        f"💰 **Entry**: ${entry:.4f} (Current: ${current_price:.4f})\n" 
+        f"🛑 **SL**: ${sl:.4f}\n"
+        f"🎯 **TP**: ${tp:.4f}\n"
+        f"---"
+        f"\n*Risk*: {risk_factor:.1f}x | *TDI Slow MA*: {tdi_slow_ma:.2f}\n"
+        f"*Volatility*: {bb_width * 100:.3f}%"
     )
+# --- END NEW FUNCTION ---
 
 
 def main():
@@ -173,16 +173,13 @@ def main():
     logger.info("🚀 Starting Binance Data Client with Consolidated Trend Strategy...")
 
     try:
-        # Determine the minimum required data points for the strategy
         MIN_KLINES_REQUIRED = max(Config.BB_PERIOD, Config.TDI_RSI_PERIOD) + 2
         
-        # Initialize clients
         client = BinanceDataClient()
         strategy = ConsolidatedTrendStrategy()
         
         safe_send_telegram_message(f"✅ Client & Strategy started. Monitoring: {', '.join(client.price_precisions.keys())} | Min Klines: {MIN_KLINES_REQUIRED}")
 
-        # Track last signal and cooldown PER SYMBOL to avoid spam
         symbol_state: Dict[str, Dict[str, Any]] = {
             symbol: {"last_signal": None, "cooldown": 0} for symbol in client.price_precisions.keys()
         }
@@ -192,33 +189,20 @@ def main():
         while True:
             for symbol in symbols_to_monitor:
                 try:
-                    # 1. Get current price and historical data for the specific symbol
                     current_price = client.get_current_price(symbol)
                     historical_data = client.get_historical_klines(symbol, limit=100)
                     state = symbol_state[symbol]
                     
-                    if not current_price:
-                        logger.warning(f"⚠️ Missing current price for {symbol}. Skipping cycle.")
-                        continue
-                    
-                    if historical_data.empty:
-                        logger.warning(f"⚠️ Historical data for {symbol} is empty. Skipping cycle.")
+                    if not current_price or historical_data.empty or len(historical_data) < MIN_KLINES_REQUIRED:
                         continue
 
-                    # Enforce Minimum Klines Check
-                    if len(historical_data) < MIN_KLINES_REQUIRED:
-                        logger.warning(f"⚠️ Insufficient klines ({len(historical_data)}/{MIN_KLINES_REQUIRED}) for {symbol}. Skipping calculation.")
-                        continue
-
-                    # 2. Analyze data
                     analyzed_data = strategy.analyze_data(historical_data)
                     
-                    # 🎯 FIX: Changed 'bb_mid' to 'bb_middle' for alignment with indicators.py
                     if not analyzed_data.empty and 'bb_middle' in analyzed_data.columns: 
-                        # 3. Generate trading signal
+                        # 3. Generate trading signal (this uses the CRITICAL DEBOUNCE logic)
                         signal_type, signal_data = strategy.generate_signal(analyzed_data)
                         
-                        # 4. Check for new signal and cooldown status for THIS symbol
+                        # 4. Check for new signal and cooldown status for THIS symbol (Secondary rate-limit)
                         is_new_signal = signal_type != "NO_TRADE"
                         is_not_spamming = (signal_type != state["last_signal"] or state["cooldown"] <= 0) 
                         
@@ -227,7 +211,6 @@ def main():
                             logger.info(f"🎯 Strategy Signal for {symbol}: {signal_type}")
                             safe_send_telegram_message(message)
                             
-                            # Update state
                             state["last_signal"] = signal_type
                             state["cooldown"] = 5  # Set cooldown (5 iterations)
                         
@@ -235,33 +218,30 @@ def main():
                         if state["cooldown"] > 0:
                             state["cooldown"] -= 1
                             
-                        # Log current status (less verbose)
                         if signal_type == "NO_TRADE":
                             logger.info(f"⚪ No trade signal for {symbol} | Price: {current_price:.4f}")
                     else:
-                        # 🎯 FIX: Changed 'bb_mid' to 'bb_middle' in the error log
                         if 'bb_middle' not in analyzed_data.columns:
-                             logger.critical(f"❌ CRASH PREVENTED: 'bb_middle' column missing for {symbol}! Strategy implementation error. Check consolidated_trend.py.")
+                             logger.critical(f"❌ CRASH PREVENTED: 'bb_middle' column missing for {symbol}!")
                         else:
                             logger.warning(f"⚠️ Analyzed data for {symbol} is empty after processing")
 
                 except Exception as e:
-                    # Localized symbol error handler
                     error_message = f"🔥 CRITICAL ERROR processing {symbol}: {type(e).__name__}: {e}"
                     logger.critical(error_message)
                     safe_send_telegram_message(escape_markdown(error_message))
                     continue
             
-            # Sleep after checking ALL symbols
             logger.info(f"😴 Polling cycle complete. Sleeping for {Config.POLLING_INTERVAL_SECONDS}s.")
             time.sleep(Config.POLLING_INTERVAL_SECONDS)
 
     except Exception as e:
-        # Global initialization error handler
         raw_error = f"🔥 Global Critical Error: {type(e).__name__}: {e}"
         logger.critical(raw_error)
         safe_send_telegram_message(escape_markdown(raw_error))
 
 
 if __name__ == "__main__":
+    # NOTE: You must also have a settings.py file and a telegram_bot.py utility file 
+    # for this code to run successfully.
     main()
