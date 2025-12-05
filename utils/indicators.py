@@ -11,38 +11,23 @@ class Indicators:
 
     @staticmethod
     def calculate_rsi(df: pd.DataFrame, period: int = Config.TDI_RSI_PERIOD) -> pd.DataFrame:
-        """
-        Calculates the Relative Strength Index (RSI) with enhanced error handling.
-        """
+        """Calculates the Relative Strength Index (RSI)."""
         try:
             if len(df) < period:
-                logger.warning(f"Not enough data for RSI calculation. Need {period} periods, got {len(df)}")
                 df['rsi'] = np.nan
                 return df
-
-            # Ensure we have valid price data
-            df['close'] = df['close'].replace(0, 0.0001)
-            df['close'] = np.where(df['close'] <= 0, 0.0001, df['close'])
-            df['close'] = df['close'].ffill()
-
+            df['close'] = df['close'].ffill().replace(0, np.finfo(float).eps)
             delta = df['close'].diff()
             gain = delta.where(delta > 0, 0)
             loss = -delta.where(delta < 0, 0)
-
-            # Use exponential moving average for smoother RSI (Wilder's smoothing approximation)
             avg_gain = gain.ewm(alpha=1/period, min_periods=period).mean()
             avg_loss = loss.ewm(alpha=1/period, min_periods=period).mean()
-
-            # Avoid division by zero with robust handling
             avg_loss_replaced = avg_loss.replace(0, np.finfo(float).eps)
             rs = avg_gain / avg_loss_replaced
             rsi = 100 - (100 / (1 + rs))
-            
             df = df.copy()
             df['rsi'] = rsi
-            
             return df
-            
         except Exception as e:
             logger.error(f"Error calculating RSI: {str(e)}", exc_info=True)
             df['rsi'] = np.nan
@@ -55,30 +40,35 @@ class Indicators:
         if len(df) < period:
             df[ma_col_name] = np.nan
             return df, ma_col_name
-
         df[ma_col_name] = df[column].rolling(window=period, min_periods=period).mean()
         return df, ma_col_name
 
     @staticmethod
+    def calculate_ema(df: pd.DataFrame, column: str, period: int) -> pd.DataFrame:
+        """
+        Calculates the Exponential Moving Average (EMA).
+        """
+        ema_col_name = f'{column}_ema_{period}'
+        if len(df) < period:
+            df[ema_col_name] = np.nan
+            return df
+        
+        df[ema_col_name] = df[column].ewm(span=period, adjust=False, min_periods=period).mean()
+        return df
+
+    @staticmethod
     def calculate_super_tdi(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Calculates the Super Traders Dynamic Index (TDI) components.
-        """
+        """Calculates the Super Traders Dynamic Index (TDI) components."""
         try:
             df = df.copy()
-            
-            # 1. Calculate RSI
-            rsi_period = getattr(Config, 'TDI_RSI_PERIOD', 14)
+            rsi_period = getattr(Config, 'TDI_RSI_PERIOD', 13)
             df = Indicators.calculate_rsi(df, period=rsi_period)
             
             if df['rsi'].isna().all():
-                logger.error("RSI calculation failed - cannot proceed with TDI")
                 tdi_cols = ['tdi_middle_bb', 'tdi_bb_upper', 'tdi_bb_lower', 'tdi_fast_ma', 'tdi_slow_ma']
-                for col in tdi_cols:
-                    df[col] = np.nan
+                for col in tdi_cols: df[col] = np.nan
                 return df
 
-            # 2. Calculate Bollinger Bands on RSI
             bb_length = getattr(Config, 'TDI_BB_LENGTH', 34)
             bb_dev = getattr(Config, 'TDI_BB_DEV', 2.0)
             
@@ -89,28 +79,22 @@ class Indicators:
                 df['tdi_bb_upper'] = df['tdi_middle_bb'] + (df['tdi_std'] * bb_dev)
                 df['tdi_bb_lower'] = df['tdi_middle_bb'] - (df['tdi_std'] * bb_dev)
             else:
-                df['tdi_middle_bb'] = np.nan
-                df['tdi_bb_upper'] = np.nan
-                df['tdi_bb_lower'] = np.nan
+                df['tdi_middle_bb'] = df['tdi_bb_upper'] = df['tdi_bb_lower'] = np.nan
 
-            # 3. Calculate Fast MA (Green Line / Bulls MA) 
             fast_ma_period = getattr(Config, 'TDI_FAST_MA_PERIOD', 1)
             df, fast_ma_col = Indicators.calculate_sma(df, 'rsi', fast_ma_period)
             df['tdi_fast_ma'] = df[fast_ma_col] 
 
-            # 4. Calculate Slow MA (Red Line / Bears MA) 
-            slow_ma_period = getattr(Config, 'TDI_SLOW_MA_PERIOD', 5)
+            slow_ma_period = getattr(Config, 'TDI_SLOW_MA_PERIOD', 7)
             df, slow_ma_col = Indicators.calculate_sma(df, 'rsi', slow_ma_period)
             df['tdi_slow_ma'] = df[slow_ma_col] 
 
-            # Calculate additional metrics (TDI Zone, Strength)
             if not df['tdi_slow_ma'].isna().all() and not df['tdi_fast_ma'].isna().all():
                 df = Indicators._calculate_tdi_metrics(df)
             else:
                 df['tdi_zone'] = 'NO_TRADE'
                 df['tdi_strength'] = 0.0
 
-            # Clean up temporary columns
             temp_cols = [col for col in df.columns if '_sma_' in col or col in ['tdi_std']]
             df = df.drop(columns=temp_cols, errors='ignore')
             
@@ -121,8 +105,7 @@ class Indicators:
             required_tdi_cols = ['rsi', 'tdi_middle_bb', 'tdi_bb_upper', 'tdi_bb_lower', 
                                'tdi_fast_ma', 'tdi_slow_ma', 'tdi_zone', 'tdi_strength']
             for col in required_tdi_cols:
-                if col not in df.columns:
-                    df[col] = np.nan
+                if col not in df.columns: df[col] = np.nan
             df['tdi_zone'] = df.get('tdi_zone', 'NO_TRADE')
             return df
 
@@ -147,7 +130,6 @@ class Indicators:
             df.loc[valid_slow_ma & (df['tdi_slow_ma'] >= soft_sell) & (df['tdi_slow_ma'] < hard_sell), 'tdi_zone'] = 'SOFT_SELL'
             df.loc[valid_slow_ma & (df['tdi_slow_ma'] >= hard_sell), 'tdi_zone'] = 'HARD_SELL'
             
-            # Calculate TDI strength
             df['tdi_strength'] = (df['tdi_slow_ma'] - center_line) / center_line
             df['tdi_strength'] = df['tdi_strength'].replace([np.inf, -np.inf], 0)
             
@@ -155,42 +137,32 @@ class Indicators:
             
         except Exception as e:
             logger.error(f"Error in _calculate_tdi_metrics: {str(e)}")
-            if 'tdi_zone' not in df.columns:
-                df['tdi_zone'] = 'NO_TRADE'
-            if 'tdi_strength' not in df.columns:
-                df['tdi_strength'] = 0.0
+            if 'tdi_zone' not in df.columns: df['tdi_zone'] = 'NO_TRADE'
+            if 'tdi_strength' not in df.columns: df['tdi_strength'] = 0.0
             return df
 
     @staticmethod
     def calculate_super_bollinger_bands(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Calculates Enhanced Super Bollinger Bands.
-        """
+        """Calculates Enhanced Super Bollinger Bands."""
         try:
             df = df.copy()
             bb_period = getattr(Config, 'BB_PERIOD', 20)
-            bb_multiplier = getattr(Config, 'BB_DEV', 2.0)
+            bb_multiplier = getattr(Config.BB_DEV, 'BB_DEV', 2.0)
             
             if len(df) < bb_period:
                 bb_cols = ['bb_middle', 'bb_upper', 'bb_lower', 'bb_width_percent', 
                           'bb_rejection_buy', 'bb_rejection_sell', 'atr']
-                for col in bb_cols:
-                    df[col] = np.nan
+                for col in bb_cols: df[col] = np.nan
                 return df
 
-            # 1. Standard Bollinger Bands
             df['bb_middle'] = df['close'].rolling(window=bb_period, min_periods=bb_period).mean()
             df['bb_std'] = df['close'].rolling(window=bb_period, min_periods=bb_period).std()
             df['bb_upper'] = df['bb_middle'] + (df['bb_std'] * bb_multiplier)
             df['bb_lower'] = df['bb_middle'] - (df['bb_std'] * bb_multiplier)
 
-            # 2. ATR-based Trend Detection
             df = Indicators._calculate_atr_trend(df)
-
-            # 3. BB Width and Rejection Metrics
             df = Indicators._calculate_bb_metrics(df)
 
-            # Clean up temporary columns
             df = df.drop(columns=['bb_std'], errors='ignore')
             
             return df
@@ -200,8 +172,7 @@ class Indicators:
             required_bb_cols = ['bb_middle', 'bb_upper', 'bb_lower', 'bb_width_percent', 
                                'bb_rejection_buy', 'bb_rejection_sell', 'atr']
             for col in required_bb_cols:
-                if col not in df.columns:
-                    df[col] = np.nan
+                if col not in df.columns: df[col] = np.nan
             return df
 
     @staticmethod
@@ -225,12 +196,10 @@ class Indicators:
     def _calculate_bb_metrics(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate BB Width and Rejection signals with error handling."""
         try:
-            # BB Width Percentage 
             df['bb_width'] = df['bb_upper'] - df['bb_lower']
             df['bb_width_percent'] = df['bb_width'] / df['bb_middle'].replace(0, np.nan)
             df['bb_width_percent'] = df['bb_width_percent'].fillna(0)
             
-            # BB Rejection Signals
             df['bb_rejection_buy'] = False
             df['bb_rejection_sell'] = False
             
@@ -258,28 +227,20 @@ class Indicators:
 
     @staticmethod
     def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Calculate all indicators required for the Consolidated Trend Strategy.
-        """
+        """Calculate all indicators required for the Consolidated Trend Strategy."""
         try:
             df = df.copy()
             df.columns = [col.lower() for col in df.columns]
             
-            # Calculate TDI indicators
             df = Indicators.calculate_super_tdi(df)
-            
-            # Calculate Bollinger Bands
             df = Indicators.calculate_super_bollinger_bands(df)
             
-            # Combine metrics for filters in strategy file
             df['tdi_trend'] = df['tdi_fast_ma'] - df['tdi_slow_ma']
             
-            # Safe division for TDI strength
             valid_slow_ma = df['tdi_slow_ma'].replace(0, np.nan)
             df['tdi_strength'] = abs(df['tdi_trend']) / valid_slow_ma
             df['tdi_strength'] = df['tdi_strength'].fillna(0)
             
-            # CRITICAL: Drop any rows where essential indicators are completely NaN
             essential_cols = ['tdi_slow_ma', 'tdi_fast_ma', 'bb_width_percent']
             df = df.dropna(subset=essential_cols, how='all')
             
@@ -290,12 +251,10 @@ class Indicators:
             required_cols = ['tdi_slow_ma', 'tdi_fast_ma', 'tdi_zone', 'tdi_strength', 
                            'bb_width_percent', 'bb_rejection_buy', 'bb_rejection_sell']
             for col in required_cols:
-                if col not in df.columns:
-                    df[col] = np.nan
+                if col not in df.columns: df[col] = np.nan
             df['tdi_zone'] = df.get('tdi_zone', 'NO_TRADE')
             return df
 
-    # --- NEW: Utility for dynamic alert messaging based on strength ---
     @staticmethod
     def get_alert_message_header(signal: str, strength: str, symbol: str) -> Tuple[str, str]:
         """Generates the header and action based on signal type and strength."""
