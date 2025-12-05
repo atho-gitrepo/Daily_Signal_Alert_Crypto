@@ -4,7 +4,6 @@ import logging
 import pandas as pd
 from typing import Dict, Optional, Tuple, Any, List 
 from settings import Config
-# NOTE: Adjusted import path for indicators to reflect assumed project structure
 from utils.indicators import Indicators 
 from utils.telegram_bot import send_telegram_message_sync as send_telegram_message
 from binance.um_futures import UMFutures
@@ -21,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# --- BinanceDataClient Class ---
+# --- BinanceDataClient Class (Code remains the same as previously validated) ---
 class BinanceDataClient:
     """Client for fetching real-time and historical data from Binance USD-M Futures."""
 
@@ -44,7 +43,6 @@ class BinanceDataClient:
         self.price_precisions: Dict[str, int] = {}
         self._get_symbol_precisions() 
         logger.info(f"✅ Binance Data Client initialized. Testnet: {self.is_testnet}")
-
 
     def _get_symbol_precisions(self):
         """Fetch price precision for all configured symbols from exchange info."""
@@ -74,13 +72,11 @@ class BinanceDataClient:
         except Exception as e:
             logger.error(f"❌ Could not fetch symbol precisions. Error: {e}")
 
-    
     def _round_price(self, symbol: str, price: float) -> float:
         """Rounds price based on symbol-specific precision."""
         precision = self.price_precisions.get(symbol, 2)
         return round(price, precision) if price else 0.0
 
-    
     def get_historical_klines(self, symbol: str, interval: str = None, limit: int = 500) -> pd.DataFrame:
         """Fetch historical klines (OHLCV) for a specific symbol."""
         interval = interval or Config.TIMEFRAME
@@ -95,7 +91,6 @@ class BinanceDataClient:
             df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
             df.set_index('close_time', inplace=True)
             df[['open','high','low','close','volume']] = df[['open','high','low','close','volume']].apply(pd.to_numeric, errors='coerce')
-            logger.info(f"📊 Fetched {len(df)} klines for {symbol}.")
             return df
         except (BinanceAPIException, BinanceRequestException) as e:
             logger.error(f"❌ Binance Error fetching {symbol}: {e}")
@@ -117,7 +112,6 @@ class BinanceDataClient:
 
 def escape_markdown(text: str) -> str:
     """Escape Telegram MarkdownV2-sensitive characters."""
-    # List of characters that need escaping in MarkdownV2
     escape_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in escape_chars:
         text = text.replace(char, f'\{char}')
@@ -132,20 +126,27 @@ def safe_send_telegram_message(message: str):
     except Exception as e:
         logger.error(f"❌ Failed to send Telegram message: {e}")
 
+# --- NEW: Function to fetch HTF data ---
+def get_htf_data(client, symbol: str) -> pd.DataFrame:
+    """Fetches the 1-hour historical data for HTF trend validation."""
+    return client.get_historical_klines(symbol, interval="1h", limit=100)
 
-# --- NEW: Formats the message using the strength logic from indicators.py ---
-def format_signal_message(symbol: str, signal_type: str, signal_data: dict, current_price: float) -> str:
-    """Format trading signal for Telegram notification, incorporating strength and details."""
+
+# --- Updated format_signal_message to include HTF trend ---
+def format_signal_message(symbol: str, signal_type: str, signal_data: dict, current_price: float, htf_trend: str) -> str:
+    """Format trading signal for Telegram notification, incorporating strength and HTF trend."""
     
-    # Get strength from strategy details (will be HARD or SOFT)
     signal_strength = signal_data.get('signal_strength', 'SOFT') 
-    
-    # Use Indicators utility to get the dynamic header
     header, action = Indicators.get_alert_message_header(signal_type, signal_strength, symbol)
     
     if signal_type == "NO_TRADE":
         reason = signal_data.get('reason', 'Conditions not met.')
-        return f"⚪ No Trade Signal on *{symbol}* | Price: ${current_price:.4f}\n*Reason*: {reason}"
+        # HTF trend is often available even on NO_TRADE
+        return (
+            f"⚪ No Trade Signal on *{symbol}* | Price: ${current_price:.4f}\n"
+            f"*1H Trend*: {htf_trend}\n"
+            f"*Reason*: {reason}"
+        )
     
     entry = signal_data.get('entry_price', current_price)
     sl = signal_data.get('stop_loss', 0)
@@ -157,6 +158,7 @@ def format_signal_message(symbol: str, signal_type: str, signal_data: dict, curr
     return (
         f"{header}\n"
         f"---"
+        f"\n*1H Trend*: **{htf_trend}**" # Highlight the Higher Timeframe Trend
         f"\n*{signal_strength} {action} SIGNAL*\n"
         f"💰 **Entry**: ${entry:.4f} (Current: ${current_price:.4f})\n" 
         f"🛑 **SL**: ${sl:.4f}\n"
@@ -165,7 +167,7 @@ def format_signal_message(symbol: str, signal_type: str, signal_data: dict, curr
         f"\n*Risk*: {risk_factor:.1f}x | *TDI Slow MA*: {tdi_slow_ma:.2f}\n"
         f"*Volatility*: {bb_width * 100:.3f}%"
     )
-# --- END NEW FUNCTION ---
+# --- END Updated FUNCTION ---
 
 
 def main():
@@ -189,39 +191,47 @@ def main():
         while True:
             for symbol in symbols_to_monitor:
                 try:
+                    # 1. Fetch 5m and 1H data
                     current_price = client.get_current_price(symbol)
-                    historical_data = client.get_historical_klines(symbol, limit=100)
+                    historical_data_5m = client.get_historical_klines(symbol, limit=100)
+                    historical_data_1h = get_htf_data(client, symbol) 
                     state = symbol_state[symbol]
                     
-                    if not current_price or historical_data.empty or len(historical_data) < MIN_KLINES_REQUIRED:
+                    if not current_price or historical_data_5m.empty or historical_data_1h.empty:
+                        logger.warning(f"Skipping {symbol}: Insufficient data.")
                         continue
 
-                    analyzed_data = strategy.analyze_data(historical_data)
+                    # 2. Set HTF Trend and Analyze 5m data
+                    strategy.set_htf_trend(historical_data_1h) # Set 1H trend bias
+                    htf_trend = strategy.get_strategy_stats()['htf_trend'] # Get the calculated trend for messaging
                     
-                    if not analyzed_data.empty and 'bb_middle' in analyzed_data.columns: 
-                        # 3. Generate trading signal (this uses the CRITICAL DEBOUNCE logic)
-                        signal_type, signal_data = strategy.generate_signal(analyzed_data)
+                    analyzed_data_5m = strategy.analyze_data(historical_data_5m)
+                    
+                    if not analyzed_data_5m.empty and 'bb_middle' in analyzed_data_5m.columns: 
+                        # 3. Generate trading signal (uses HTF filter and debounce internally)
+                        signal_type, signal_data = strategy.generate_signal(analyzed_data_5m)
                         
-                        # 4. Check for new signal and cooldown status for THIS symbol (Secondary rate-limit)
+                        # 4. Check for new signal and cooldown status
                         is_new_signal = signal_type != "NO_TRADE"
                         is_not_spamming = (signal_type != state["last_signal"] or state["cooldown"] <= 0) 
                         
                         if is_new_signal and is_not_spamming:
-                            message = format_signal_message(symbol, signal_type, signal_data, current_price)
-                            logger.info(f"🎯 Strategy Signal for {symbol}: {signal_type}")
+                            message = format_signal_message(symbol, signal_type, signal_data, current_price, htf_trend)
+                            logger.info(f"🎯 Strategy Signal for {symbol}: {signal_type} | HTF: {htf_trend}")
                             safe_send_telegram_message(message)
                             
                             state["last_signal"] = signal_type
-                            state["cooldown"] = 5  # Set cooldown (5 iterations)
+                            state["cooldown"] = 5  
                         
                         # Decrement cooldown if active
                         if state["cooldown"] > 0:
                             state["cooldown"] -= 1
                             
                         if signal_type == "NO_TRADE":
-                            logger.info(f"⚪ No trade signal for {symbol} | Price: {current_price:.4f}")
+                             logger.info(f"⚪ No trade signal for {symbol} | HTF: {htf_trend} | Price: {current_price:.4f}")
+
                     else:
-                        if 'bb_middle' not in analyzed_data.columns:
+                        if 'bb_middle' not in analyzed_data_5m.columns:
                              logger.critical(f"❌ CRASH PREVENTED: 'bb_middle' column missing for {symbol}!")
                         else:
                             logger.warning(f"⚠️ Analyzed data for {symbol} is empty after processing")
@@ -242,6 +252,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # NOTE: You must also have a settings.py file and a telegram_bot.py utility file 
-    # for this code to run successfully.
+    # NOTE: Ensure you have 'utils/telegram_bot.py' present with a functional 'send_telegram_message_sync'
     main()
