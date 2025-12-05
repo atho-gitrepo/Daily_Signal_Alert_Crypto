@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 import logging
-from typing import Tuple, Dict, Optional
+from typing import Tuple, Dict, Optional, List
 from settings import Config 
 
 logger = logging.getLogger(__name__)
@@ -21,12 +21,9 @@ class Indicators:
                 return df
 
             # Ensure we have valid price data
-            if df['close'].isna().any() or (df['close'] <= 0).any():
-                logger.warning("Invalid price data detected in RSI calculation")
-                # Replace invalid values
-                df['close'] = df['close'].replace(0, 0.0001)
-                df['close'] = np.where(df['close'] <= 0, 0.0001, df['close'])
-                df['close'] = df['close'].ffill()
+            df['close'] = df['close'].replace(0, 0.0001)
+            df['close'] = np.where(df['close'] <= 0, 0.0001, df['close'])
+            df['close'] = df['close'].ffill()
 
             delta = df['close'].diff()
             gain = delta.where(delta > 0, 0)
@@ -44,14 +41,6 @@ class Indicators:
             df = df.copy()
             df['rsi'] = rsi
             
-            # Validate RSI output
-            if df['rsi'].isna().all():
-                logger.error("RSI calculation resulted in all NaN values")
-            elif (df['rsi'] == 0).all():
-                logger.error("RSI calculation resulted in all zero values")
-            else:
-                logger.debug(f"RSI calculated successfully. Range: {df['rsi'].min():.2f} - {df['rsi'].max():.2f}")
-            
             return df
             
         except Exception as e:
@@ -62,12 +51,11 @@ class Indicators:
     @staticmethod
     def calculate_sma(df: pd.DataFrame, column: str, period: int) -> Tuple[pd.DataFrame, str]:
         """Calculates Simple Moving Average with validation."""
+        ma_col_name = f'{column}_sma_{period}'
         if len(df) < period:
-            ma_col_name = f'{column}_sma_{period}'
             df[ma_col_name] = np.nan
             return df, ma_col_name
 
-        ma_col_name = f'{column}_sma_{period}'
         df[ma_col_name] = df[column].rolling(window=period, min_periods=period).mean()
         return df, ma_col_name
 
@@ -75,95 +63,50 @@ class Indicators:
     def calculate_super_tdi(df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculates the Super Traders Dynamic Index (TDI) components.
-        FIXED VERSION with comprehensive error handling and logging.
         """
         try:
             df = df.copy()
             
-            # Validate input data
-            required_columns = ['open', 'high', 'low', 'close']
-            missing_columns = [col for col in required_columns if col not in df.columns]
-            if missing_columns:
-                logger.error(f"Missing required columns for TDI: {missing_columns}")
-                # Initialize TDI columns with NaN to prevent strategy errors
-                tdi_columns = ['rsi', 'tdi_middle_bb', 'tdi_bb_upper', 'tdi_bb_lower', 
-                              'tdi_fast_ma', 'tdi_slow_ma', 'tdi_zone', 'tdi_strength']
-                for col in tdi_columns:
-                    df[col] = np.nan
-                return df
-            
-            # Clean price data
-            price_cols = ['open', 'high', 'low', 'close']
-            for col in price_cols:
-                if col in df.columns:
-                    df[col] = df[col].replace(0, np.nan).ffill()
-                    df[col] = np.where(df[col] <= 0, np.nan, df[col])
-                    df[col] = df[col].ffill()
-            
-            # Check if we have any valid data left
-            if df['close'].isna().all():
-                logger.error("No valid price data after cleaning")
-                return df
-
             # 1. Calculate RSI
             rsi_period = getattr(Config, 'TDI_RSI_PERIOD', 14)
-            logger.info(f"Calculating TDI RSI with period {rsi_period}, data length: {len(df)}")
-            
             df = Indicators.calculate_rsi(df, period=rsi_period)
             
-            # Check if RSI calculation was successful
-            if df['rsi'].isna().all() or (df['rsi'] == 0).all():
+            if df['rsi'].isna().all():
                 logger.error("RSI calculation failed - cannot proceed with TDI")
-                # Initialize required TDI columns with NaN
                 tdi_cols = ['tdi_middle_bb', 'tdi_bb_upper', 'tdi_bb_lower', 'tdi_fast_ma', 'tdi_slow_ma']
                 for col in tdi_cols:
                     df[col] = np.nan
                 return df
 
-            logger.info(f"RSI calculated successfully. Sample values: {df['rsi'].dropna().head().tolist()}")
-
             # 2. Calculate Bollinger Bands on RSI
             bb_length = getattr(Config, 'TDI_BB_LENGTH', 34)
             bb_dev = getattr(Config, 'TDI_BB_DEV', 2.0)
             
-            if len(df) < bb_length:
-                logger.warning(f"Insufficient data for TDI BB. Need {bb_length}, got {len(df)}")
+            if len(df) >= bb_length:
+                df, middle_bb_col = Indicators.calculate_sma(df, 'rsi', bb_length)
+                df['tdi_middle_bb'] = df[middle_bb_col]
+                df['tdi_std'] = df['rsi'].rolling(window=bb_length, min_periods=bb_length).std()
+                df['tdi_bb_upper'] = df['tdi_middle_bb'] + (df['tdi_std'] * bb_dev)
+                df['tdi_bb_lower'] = df['tdi_middle_bb'] - (df['tdi_std'] * bb_dev)
+            else:
                 df['tdi_middle_bb'] = np.nan
                 df['tdi_bb_upper'] = np.nan
                 df['tdi_bb_lower'] = np.nan
-            else:
-                df, middle_bb_col = Indicators.calculate_sma(df, 'rsi', bb_length)
-                df['tdi_middle_bb'] = df[middle_bb_col]
-                
-                df['tdi_std'] = df['rsi'].rolling(window=bb_length, min_periods=bb_length).std()
-                
-                # Calculate BB bands with safety checks
-                df['tdi_bb_upper'] = df['tdi_middle_bb'] + (df['tdi_std'] * bb_dev)
-                df['tdi_bb_lower'] = df['tdi_middle_bb'] - (df['tdi_std'] * bb_dev)
 
-            # 3. Calculate Fast MA (Green Line / Bulls MA) - SMA(RSI, 1)
+            # 3. Calculate Fast MA (Green Line / Bulls MA) 
             fast_ma_period = getattr(Config, 'TDI_FAST_MA_PERIOD', 1)
             df, fast_ma_col = Indicators.calculate_sma(df, 'rsi', fast_ma_period)
             df['tdi_fast_ma'] = df[fast_ma_col] 
 
-            # 4. Calculate Slow MA (Red Line / Bears MA) - SMA(RSI, 5)
+            # 4. Calculate Slow MA (Red Line / Bears MA) 
             slow_ma_period = getattr(Config, 'TDI_SLOW_MA_PERIOD', 5)
             df, slow_ma_col = Indicators.calculate_sma(df, 'rsi', slow_ma_period)
             df['tdi_slow_ma'] = df[slow_ma_col] 
 
-            # CRITICAL FIX: Replace zeros and handle NaN values properly
-            df['tdi_slow_ma'] = df['tdi_slow_ma'].replace(0, np.nan).ffill()
-            df['tdi_fast_ma'] = df['tdi_fast_ma'].replace(0, np.nan).ffill()
-            
-            # Only calculate additional metrics if we have valid TDI data
-            valid_tdi_data = not df['tdi_slow_ma'].isna().all() and not df['tdi_fast_ma'].isna().all()
-            
-            if valid_tdi_data:
+            # Calculate additional metrics (TDI Zone, Strength)
+            if not df['tdi_slow_ma'].isna().all() and not df['tdi_fast_ma'].isna().all():
                 df = Indicators._calculate_tdi_metrics(df)
-                logger.info(f"TDI calculation completed. Slow MA range: {df['tdi_slow_ma'].min():.2f} - {df['tdi_slow_ma'].max():.2f}")
             else:
-                logger.warning("Insufficient valid TDI data for metric calculation")
-                # Initialize missing metrics
                 df['tdi_zone'] = 'NO_TRADE'
                 df['tdi_strength'] = 0.0
 
@@ -175,7 +118,6 @@ class Indicators:
 
         except Exception as e:
             logger.error(f"Critical error in calculate_super_tdi: {str(e)}", exc_info=True)
-            # Ensure all required columns are present even on error
             required_tdi_cols = ['rsi', 'tdi_middle_bb', 'tdi_bb_upper', 'tdi_bb_lower', 
                                'tdi_fast_ma', 'tdi_slow_ma', 'tdi_zone', 'tdi_strength']
             for col in required_tdi_cols:
@@ -188,25 +130,16 @@ class Indicators:
     def _calculate_tdi_metrics(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate additional TDI-based metrics for signal generation."""
         try:
-            # TDI Crossover signals (Used for logging/debug)
-            df['tdi_bullish_cross'] = (df['tdi_fast_ma'] > df['tdi_slow_ma']) & \
-                                     (df['tdi_fast_ma'].shift(1) <= df['tdi_slow_ma'].shift(1))
-            df['tdi_bearish_cross'] = (df['tdi_fast_ma'] < df['tdi_slow_ma']) & \
-                                     (df['tdi_fast_ma'].shift(1) >= df['tdi_slow_ma'].shift(1))
-            
-            # TDI Zone detection (Using TDI Slow MA for zone check as it's the trend line)
-            df['tdi_zone'] = 'NO_TRADE'
-            
-            # Safely get configuration values with defaults
             center_line = getattr(Config, 'TDI_CENTER_LINE', 50)
             hard_buy = getattr(Config, 'TDI_HARD_BUY_LEVEL', 25)
             soft_buy = getattr(Config, 'TDI_SOFT_BUY_LEVEL', 35)
             soft_sell = getattr(Config, 'TDI_SOFT_SELL_LEVEL', 65)
             hard_sell = getattr(Config, 'TDI_HARD_SELL_LEVEL', 75)
             
-            # Apply zone logic with NaN safety
+            df['tdi_zone'] = 'NO_TRADE'
             valid_slow_ma = df['tdi_slow_ma'].notna()
             
+            # Apply zone logic
             df.loc[valid_slow_ma & (df['tdi_slow_ma'] <= hard_buy), 'tdi_zone'] = 'HARD_BUY'
             df.loc[valid_slow_ma & (df['tdi_slow_ma'] > hard_buy) & (df['tdi_slow_ma'] <= soft_buy), 'tdi_zone'] = 'SOFT_BUY'
             df.loc[valid_slow_ma & (df['tdi_slow_ma'] > soft_buy) & (df['tdi_slow_ma'] < center_line), 'tdi_zone'] = 'BUY_ZONE'
@@ -214,17 +147,14 @@ class Indicators:
             df.loc[valid_slow_ma & (df['tdi_slow_ma'] >= soft_sell) & (df['tdi_slow_ma'] < hard_sell), 'tdi_zone'] = 'SOFT_SELL'
             df.loc[valid_slow_ma & (df['tdi_slow_ma'] >= hard_sell), 'tdi_zone'] = 'HARD_SELL'
             
-            # Calculate TDI strength with division safety
+            # Calculate TDI strength
             df['tdi_strength'] = (df['tdi_slow_ma'] - center_line) / center_line
-            
-            # Replace any infinite values resulting from division
             df['tdi_strength'] = df['tdi_strength'].replace([np.inf, -np.inf], 0)
             
             return df
             
         except Exception as e:
             logger.error(f"Error in _calculate_tdi_metrics: {str(e)}")
-            # Ensure basic columns exist
             if 'tdi_zone' not in df.columns:
                 df['tdi_zone'] = 'NO_TRADE'
             if 'tdi_strength' not in df.columns:
@@ -235,7 +165,6 @@ class Indicators:
     def calculate_super_bollinger_bands(df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculates Enhanced Super Bollinger Bands.
-        FIXED VERSION with comprehensive error handling.
         """
         try:
             df = df.copy()
@@ -243,42 +172,32 @@ class Indicators:
             bb_multiplier = getattr(Config, 'BB_DEV', 2.0)
             
             if len(df) < bb_period:
-                logger.warning(f"Not enough data for BB calculation. Need {bb_period} periods, got {len(df)}")
-                # Initialize BB columns with NaN
-                bb_cols = ['bb_middle', 'bb_upper', 'bb_lower', 'bb_width', 'bb_width_percent', 
+                bb_cols = ['bb_middle', 'bb_upper', 'bb_lower', 'bb_width_percent', 
                           'bb_rejection_buy', 'bb_rejection_sell', 'atr']
                 for col in bb_cols:
                     df[col] = np.nan
                 return df
 
-            # 1. Standard Bollinger Bands (The primary bands for rejection)
+            # 1. Standard Bollinger Bands
             df['bb_middle'] = df['close'].rolling(window=bb_period, min_periods=bb_period).mean()
             df['bb_std'] = df['close'].rolling(window=bb_period, min_periods=bb_period).std()
             df['bb_upper'] = df['bb_middle'] + (df['bb_std'] * bb_multiplier)
             df['bb_lower'] = df['bb_middle'] - (df['bb_std'] * bb_multiplier)
 
-            # 2. SMMA Trend Line (approximation)
-            trend_period = getattr(Config, 'BB_TREND_PERIOD', 9)
-            df['smma'] = df['close'].ewm(alpha=1/trend_period, adjust=False).mean() 
-
-            # 3. ATR-based Trend Detection
+            # 2. ATR-based Trend Detection
             df = Indicators._calculate_atr_trend(df)
 
-            # 4. BB Rejection Metrics (CRITICAL for strategy)
+            # 3. BB Width and Rejection Metrics
             df = Indicators._calculate_bb_metrics(df)
 
             # Clean up temporary columns
-            temp_cols = ['bb_std']
-            df = df.drop(columns=[col for col in temp_cols if col in df.columns], errors='ignore')
-            
-            logger.debug("Bollinger Bands calculated successfully")
+            df = df.drop(columns=['bb_std'], errors='ignore')
             
             return df
 
         except Exception as e:
             logger.error(f"Error in calculate_super_bollinger_bands: {str(e)}", exc_info=True)
-            # Ensure required columns exist even on error
-            required_bb_cols = ['bb_middle', 'bb_upper', 'bb_lower', 'bb_width', 'bb_width_percent', 
+            required_bb_cols = ['bb_middle', 'bb_upper', 'bb_lower', 'bb_width_percent', 
                                'bb_rejection_buy', 'bb_rejection_sell', 'atr']
             for col in required_bb_cols:
                 if col not in df.columns:
@@ -306,18 +225,15 @@ class Indicators:
     def _calculate_bb_metrics(df: pd.DataFrame) -> pd.DataFrame:
         """Calculate BB Width and Rejection signals with error handling."""
         try:
-            # BB Width Percentage (for volatility filter)
+            # BB Width Percentage 
             df['bb_width'] = df['bb_upper'] - df['bb_lower']
-            
-            # Safe division for width percentage
             df['bb_width_percent'] = df['bb_width'] / df['bb_middle'].replace(0, np.nan)
             df['bb_width_percent'] = df['bb_width_percent'].fillna(0)
             
-            # BB Rejection Signals with NaN safety
+            # BB Rejection Signals
             df['bb_rejection_buy'] = False
             df['bb_rejection_sell'] = False
             
-            # Only calculate if we have sufficient data
             if len(df) > 1:
                 df['bb_rejection_buy'] = (
                     (df['low'].shift(1) <= df['bb_lower'].shift(1)) & 
@@ -335,7 +251,6 @@ class Indicators:
             
         except Exception as e:
             logger.error(f"Error in _calculate_bb_metrics: {str(e)}")
-            df['bb_width'] = np.nan
             df['bb_width_percent'] = np.nan
             df['bb_rejection_buy'] = False
             df['bb_rejection_sell'] = False
@@ -345,13 +260,10 @@ class Indicators:
     def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate all indicators required for the Consolidated Trend Strategy.
-        FIXED VERSION with robust error handling.
         """
         try:
             df = df.copy()
             df.columns = [col.lower() for col in df.columns]
-
-            logger.info("Starting indicator calculation...")
             
             # Calculate TDI indicators
             df = Indicators.calculate_super_tdi(df)
@@ -369,20 +281,12 @@ class Indicators:
             
             # CRITICAL: Drop any rows where essential indicators are completely NaN
             essential_cols = ['tdi_slow_ma', 'tdi_fast_ma', 'bb_width_percent']
-            before_drop = len(df)
             df = df.dropna(subset=essential_cols, how='all')
-            after_drop = len(df)
-            
-            if before_drop != after_drop:
-                logger.info(f"Dropped {before_drop - after_drop} rows with missing essential indicators")
-            
-            logger.info(f"Indicator calculation completed. Final data shape: {df.shape}")
             
             return df
 
         except Exception as e:
             logger.error(f"Critical error in calculate_all_indicators: {str(e)}", exc_info=True)
-            # Return the original dataframe with minimal indicator initialization
             required_cols = ['tdi_slow_ma', 'tdi_fast_ma', 'tdi_zone', 'tdi_strength', 
                            'bb_width_percent', 'bb_rejection_buy', 'bb_rejection_sell']
             for col in required_cols:
@@ -391,36 +295,32 @@ class Indicators:
             df['tdi_zone'] = df.get('tdi_zone', 'NO_TRADE')
             return df
 
+    # --- NEW: Utility for dynamic alert messaging based on strength ---
     @staticmethod
-    def validate_indicators(df: pd.DataFrame) -> bool:
-        """
-        Validate that all required indicators are properly calculated.
-        This helps the strategy determine if signals can be generated.
-        """
-        try:
-            required_indicators = [
-                'tdi_slow_ma', 'tdi_fast_ma', 'tdi_zone', 'tdi_strength',
-                'bb_width_percent', 'bb_rejection_buy', 'bb_rejection_sell', 'atr'
-            ]
+    def get_alert_message_header(signal: str, strength: str, symbol: str) -> Tuple[str, str]:
+        """Generates the header and action based on signal type and strength."""
+        signal = signal.upper()
+        strength = strength.upper()
+        
+        if signal == 'BUY':
+            action = "LONG"
+            if strength == 'HARD':
+                header = f"🚨 **HARD BUY SIGNAL** | LONG *{symbol}* 🟢"
+            elif strength == 'SOFT':
+                header = f"🟢 Soft Buy Signal | LONG *{symbol}* 📊"
+            else:
+                header = f"🟢 BUY Signal | LONG *{symbol}* 📈"
             
-            for indicator in required_indicators:
-                if indicator not in df.columns:
-                    logger.error(f"Missing required indicator: {indicator}")
-                    return False
-                
-                # Check if indicator has valid values (not all NaN)
-                if df[indicator].isna().all():
-                    logger.error(f"Indicator {indicator} has all NaN values")
-                    return False
+        elif signal == 'SELL':
+            action = "SHORT"
+            if strength == 'HARD':
+                header = f"🚨 **HARD SELL SIGNAL** | SHORT *{symbol}* 🔴"
+            elif strength == 'SOFT':
+                header = f"🔴 Soft Sell Signal | SHORT *{symbol}* 📉"
+            else:
+                header = f"🔴 SELL Signal | SHORT *{symbol}* 📉"
+        else:
+            header = f"ℹ️ Market State: NO TRADE on *{symbol}*"
+            action = "NO_TRADE"
             
-            # Check if we have at least some valid TDI values
-            if df['tdi_slow_ma'].isna().all() or df['tdi_fast_ma'].isna().all():
-                logger.error("TDI indicators have no valid values")
-                return False
-                
-            logger.info("All indicators validated successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error validating indicators: {str(e)}")
-            return False
+        return header, action
