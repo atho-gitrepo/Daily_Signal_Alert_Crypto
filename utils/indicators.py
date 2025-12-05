@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Tuple, Dict, Optional
-# Assuming settings.py has been configured with new settings
 from settings import Config 
 
 logger = logging.getLogger(__name__)
@@ -71,54 +70,6 @@ class Indicators:
         ma_col_name = f'{column}_sma_{period}'
         df[ma_col_name] = df[column].rolling(window=period, min_periods=period).mean()
         return df, ma_col_name
-
-    @staticmethod
-    def calculate_ema(df: pd.DataFrame, column: str, period: int) -> Tuple[pd.DataFrame, str]:
-        """Calculates Exponential Moving Average (EMA) with validation."""
-        if len(df) < period:
-            ma_col_name = f'{column}_ema_{period}'
-            df[ma_col_name] = np.nan
-            return df, ma_col_name
-
-        ma_col_name = f'{column}_ema_{period}'
-        # Using EWM for EMA calculation
-        df[ma_col_name] = df[column].ewm(span=period, adjust=False, min_periods=period).mean()
-        return df, ma_col_name
-        
-    @staticmethod
-    def calculate_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3, smoothing: int = 3) -> pd.DataFrame:
-        """
-        Calculates Stochastic %K and %D based on price (used for confirmation).
-        """
-        try:
-            df = df.copy()
-            if len(df) < k_period or len(df) < d_period or len(df) < smoothing:
-                logger.warning(f"Insufficient data for Stochastic calculation. Needed at least {max(k_period, d_period, smoothing)}.")
-                df['stoch_k'] = np.nan
-                df['stoch_d'] = np.nan
-                return df
-                
-            # High/Low over the K-period
-            low_min = df['low'].rolling(window=k_period).min()
-            high_max = df['high'].rolling(window=k_period).max()
-            
-            # Calculate %K
-            # Handle potential division by zero (high_max - low_min)
-            range_diff = (high_max - low_min).replace(0, np.finfo(float).eps)
-            df['stoch_k_raw'] = 100 * ((df['close'] - low_min) / range_diff)
-            
-            # Smooth %K
-            df['stoch_k'] = df['stoch_k_raw'].rolling(window=smoothing).mean()
-            
-            # Calculate %D (SMA of %K)
-            df['stoch_d'] = df['stoch_k'].rolling(window=d_period).mean()
-            
-            return df
-        except Exception as e:
-            logger.error(f"Error calculating Stochastic: {str(e)}", exc_info=True)
-            df['stoch_k'] = np.nan
-            df['stoch_d'] = np.nan
-            return df
 
     @staticmethod
     def calculate_super_tdi(df: pd.DataFrame) -> pd.DataFrame:
@@ -393,8 +344,8 @@ class Indicators:
     @staticmethod
     def calculate_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Calculate all indicators required for the Combined Trading Strategy.
-        Modified to include 200 EMA and Stochastic.
+        Calculate all indicators required for the Consolidated Trend Strategy.
+        FIXED VERSION with robust error handling.
         """
         try:
             df = df.copy()
@@ -408,16 +359,6 @@ class Indicators:
             # Calculate Bollinger Bands
             df = Indicators.calculate_super_bollinger_bands(df)
             
-            # Calculate 200 EMA (for Trend Filter)
-            df, ema_col = Indicators.calculate_ema(df, 'close', 200)
-            df['ema_200'] = df[ema_col]
-            
-            # Calculate Stochastic (for additional momentum check/confirmation)
-            df = Indicators.calculate_stochastic(df, 
-                                                k_period=getattr(Config, 'STOCH_PERIOD', 14), 
-                                                d_period=getattr(Config, 'STOCH_LENGTH', 3), 
-                                                smoothing=getattr(Config, 'STOCH_SMOOTHING', 3))
-            
             # Combine metrics for filters in strategy file
             df['tdi_trend'] = df['tdi_fast_ma'] - df['tdi_slow_ma']
             
@@ -427,10 +368,9 @@ class Indicators:
             df['tdi_strength'] = df['tdi_strength'].fillna(0)
             
             # CRITICAL: Drop any rows where essential indicators are completely NaN
-            essential_cols = ['tdi_slow_ma', 'tdi_fast_ma', 'bb_width_percent', 'ema_200', 'stoch_k']
+            essential_cols = ['tdi_slow_ma', 'tdi_fast_ma', 'bb_width_percent']
             before_drop = len(df)
-            # Use 'any' drop to be safer, but only on essential columns
-            df.dropna(subset=essential_cols, how='any', inplace=True)
+            df = df.dropna(subset=essential_cols, how='all')
             after_drop = len(df)
             
             if before_drop != after_drop:
@@ -444,8 +384,7 @@ class Indicators:
             logger.error(f"Critical error in calculate_all_indicators: {str(e)}", exc_info=True)
             # Return the original dataframe with minimal indicator initialization
             required_cols = ['tdi_slow_ma', 'tdi_fast_ma', 'tdi_zone', 'tdi_strength', 
-                           'bb_width_percent', 'bb_rejection_buy', 'bb_rejection_sell', 
-                           'ema_200', 'stoch_k', 'stoch_d']
+                           'bb_width_percent', 'bb_rejection_buy', 'bb_rejection_sell']
             for col in required_cols:
                 if col not in df.columns:
                     df[col] = np.nan
@@ -456,12 +395,12 @@ class Indicators:
     def validate_indicators(df: pd.DataFrame) -> bool:
         """
         Validate that all required indicators are properly calculated.
+        This helps the strategy determine if signals can be generated.
         """
         try:
             required_indicators = [
                 'tdi_slow_ma', 'tdi_fast_ma', 'tdi_zone', 'tdi_strength',
-                'bb_width_percent', 'bb_rejection_buy', 'bb_rejection_sell', 'atr',
-                'ema_200', 'stoch_k', 'stoch_d' # Added new indicators
+                'bb_width_percent', 'bb_rejection_buy', 'bb_rejection_sell', 'atr'
             ]
             
             for indicator in required_indicators:
