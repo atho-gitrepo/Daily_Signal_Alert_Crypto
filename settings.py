@@ -53,8 +53,8 @@ class Config:
     # ----------------------- Polling & API Control ----------------------
     
     # CRITICAL: Reduced to 30s to accurately catch 5m candle closures
-    POLLING_INTERVAL_SECONDS: int = safe_int_env("POLLING_INTERVAL_SECONDS", 30)
-    API_TIMEOUT_SECONDS: int = safe_int_env("API_TIMEOUT_SECONDS", 10)
+    POLLING_INTERVAL_SECONDS: int = safe_int_env("POLLING_INTERVAL_SECONDS", 5)
+    API_TIMEOUT_SECONDS: int = safe_int_env("API_TIMEOUT_SECONDS", 5)
     
     # --------------------- Strategy Parameters (Strict 5m Scalping) ---------------------
     
