@@ -87,7 +87,7 @@ class ConsolidatedTrendStrategy:
 
         logger.info(f"Higher Timeframe (1H) Trend set to: {self.HTF_TREND}")
 
-    def _calculate_structural_sl_tp(self, df, last_candle, signal_type, risk_factor=1.0):
+    def _calculate_structural_sl_tp(self, df, last_candle, signal_type, risk_factor=2.0):
         """Calculates SL/TP based on recent swing structure and 1:1 RRR."""
         try:
             entry_price = last_candle['close']
