@@ -9,7 +9,7 @@ from settings import Config
 logger = logging.getLogger(__name__)
 
 # --- Strategy Constants ---
-RRR_RATIO = 1.0 
+RRR_RATIO = 2.0 #you can set 1.0 and 1.5 as needed for Risk and Ratio
 MIN_BB_WIDTH_PERCENT = 0.003 
 MAX_BB_WIDTH_PERCENT = 0.03
 TDI_NO_TRADE_RANGE = 5 
