@@ -151,7 +151,7 @@ def format_signal_message(symbol: str, signal_type: str, signal_data: dict, curr
     entry = signal_data.get('entry_price', current_price)
     sl = signal_data.get('stop_loss', 0)
     tp = signal_data.get('take_profit', 0)
-    risk_factor = signal_data.get('risk_factor', 1.0)
+    risk_factor = signal_data.get('risk_factor', 2.0)
     tdi_slow_ma = signal_data.get('tdi_slow_ma', 0)
     bb_width = signal_data.get('bb_width_percent', 0)
     
