@@ -48,7 +48,7 @@ class Config:
     ).upper().split(',') 
     
     # CRITICAL: Set the timeframe to 5m for day trading focus
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "5m")
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")
 
     # ----------------------- Polling & API Control ----------------------
     
