@@ -22,8 +22,8 @@ class ConsolidatedTrendStrategy:
     def __init__(self):
         logger.info("Consolidated/Trend Trading Strategy (5m/1H) initialized.")
         self.MIN_KLINES_REQUIRED = max(
-            getattr(Config, 'TDI_RSI_PERIOD', 13),
-            getattr(Config, 'TDI_BB_LENGTH', 34),
+            getattr(Config, 'TDI_RSI_PERIOD', 14),
+            getattr(Config, 'TDI_BB_LENGTH', 20),
             getattr(Config, 'BB_PERIOD', 20),
             getattr(Config, 'TDI_SLOW_MA_PERIOD', 7)
         ) + 20 
