@@ -48,7 +48,7 @@ class Config:
     ).upper().split(',') 
     
     # CRITICAL: Set the timeframe to 5m for day trading focus
-    TIMEFRAME: str = os.getenv("TIMEFRAME", "5m")
+    TIMEFRAME: str = os.getenv("TIMEFRAME", "15m")
 
     # ----------------------- Polling & API Control ----------------------
     
@@ -59,8 +59,8 @@ class Config:
     # --------------------- Strategy Parameters (Strict 5m Scalping) ---------------------
     
     # Traders Dynamic Index (TDI) Parameters
-    TDI_RSI_PERIOD: int = 13
-    TDI_BB_LENGTH: int = 34 # Slower BB on RSI for major trend filtering
+    TDI_RSI_PERIOD: int = 14
+    TDI_BB_LENGTH: int = 20 # Slower BB on RSI for major trend filtering
     TDI_FAST_MA_PERIOD: int = 1 # Green Line 
     TDI_SLOW_MA_PERIOD: int = 7 # Red Line (Slower trend confirmation)
     
